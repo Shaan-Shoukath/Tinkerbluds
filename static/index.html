@@ -1781,6 +1781,16 @@
                 score: data.parameter_scores.humidity,
               },
               {
+                label: "🏜️ Soil Moisture",
+                actual:
+                  (data.weather_actual.avg_soil_moisture || 0).toFixed(3) +
+                  " m³/m³",
+                ideal:
+                  (data.crop_ideal.soil_moisture_range || "0.15–0.40") +
+                  " m³/m³",
+                score: data.parameter_scores.soil_moisture || 0.5,
+              },
+              {
                 label: "🌿 Vegetation",
                 actual: "NDVI from satellite",
                 ideal: "≥ 0.3 optimal",
@@ -1811,6 +1821,36 @@
                 </div>`;
             });
             document.getElementById("comparisonRows").innerHTML = html;
+
+            // Unsuitability warning banner
+            let unsuitBanner = document.getElementById("unsuitabilityBanner");
+            if (!unsuitBanner) {
+              unsuitBanner = document.createElement("div");
+              unsuitBanner.id = "unsuitabilityBanner";
+              document.getElementById("weatherComparison").after(unsuitBanner);
+            }
+            if (
+              data.is_unsuitable &&
+              data.unsuitability_reasons &&
+              data.unsuitability_reasons.length > 0
+            ) {
+              let warnHtml = `
+                <div style="margin-top:1rem; background:rgba(252,129,74,0.08); border:1px solid rgba(252,129,74,0.3); border-radius:10px; padding:0.8rem;">
+                  <div style="font-size:0.75rem; font-weight:700; color:#fc8150; margin-bottom:0.5rem;">🚫 Not Recommended for This Region</div>`;
+              data.unsuitability_reasons.forEach((r) => {
+                warnHtml += `
+                  <div style="font-size:0.65rem; color:#e2e8f0; padding:0.25rem 0; display:flex; align-items:center; gap:0.4rem;">
+                    <span>${r.icon}</span>
+                    <span>${r.reason}</span>
+                  </div>`;
+              });
+              warnHtml += `</div>`;
+              unsuitBanner.innerHTML = warnHtml;
+              unsuitBanner.style.display = "block";
+            } else {
+              unsuitBanner.innerHTML = "";
+              unsuitBanner.style.display = "none";
+            }
           }
         } else {
           document.getElementById("yieldSection").style.display = "none";
@@ -1858,12 +1898,22 @@
                 <div style="height: 5px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; margin-bottom: 0.5rem;">
                   <div style="height: 100%; width: ${pct}%; background: ${barColor}; border-radius: 3px; transition: width 0.6s ease;"></div>
                 </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.2rem; font-size: 0.52rem; color: #a0aec0;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.2rem; font-size: 0.52rem; color: #a0aec0;">
                   <div>🌡️ ${(crop.temp_score * 100).toFixed(0)}%</div>
                   <div>🌧️ ${(crop.rain_score * 100).toFixed(0)}%</div>
                   <div>💧 ${(crop.humidity_score * 100).toFixed(0)}%</div>
+                  <div>🏜️ ${((crop.soil_score || 0.5) * 100).toFixed(0)}%</div>
                   <div>🌿 ${(crop.vegetation_score * 100).toFixed(0)}%</div>
                 </div>
+                ${
+                  crop.unsuitability_reasons &&
+                  crop.unsuitability_reasons.length > 0
+                    ? `
+                <div style="margin-top:0.4rem; padding:0.3rem 0.5rem; background:rgba(252,129,74,0.1); border-radius:6px; font-size:0.5rem; color:#fc8150;">
+                  ⚠️ ${crop.unsuitability_reasons.map((r) => r.reason.split(" — ")[0]).join(", ")}
+                </div>`
+                    : ""
+                }
               </div>`;
           });
           recoContainer.innerHTML = recoHtml;
@@ -1871,11 +1921,32 @@
           document.getElementById("recoSection").style.display = "none";
         }
 
-        // Show plot confirmation section
-        document.getElementById("confirmSection").style.display = "block";
-        document.getElementById("confirmPrompt").style.display = "block";
-        document.getElementById("farmerForm").style.display = "none";
-        document.getElementById("confirmResult").style.display = "none";
+        // Show plot confirmation section — only for PASS or REVIEW plots
+        const vDecision =
+          (lastValidationData && lastValidationData.decision) || "";
+        if (vDecision === "PASS" || vDecision === "REVIEW") {
+          document.getElementById("confirmSection").style.display = "block";
+          document.getElementById("confirmPrompt").style.display = "block";
+          document.getElementById("farmerForm").style.display = "none";
+          document.getElementById("confirmResult").style.display = "none";
+        } else {
+          // FAIL — hide the save option, show explanation
+          document.getElementById("confirmSection").style.display = "block";
+          document.getElementById("confirmPrompt").style.display = "none";
+          document.getElementById("farmerForm").style.display = "none";
+          document.getElementById("confirmResult").style.display = "block";
+          document.getElementById("confirmResult").innerHTML = `
+            <div style="text-align:center; padding:1.5rem;">
+              <div style="font-size:2rem; margin-bottom:0.5rem;">🚫</div>
+              <div style="color:#fc8150; font-weight:700; font-size:0.85rem; margin-bottom:0.3rem;">
+                Cannot Register Plot
+              </div>
+              <div style="color:#a0aec0; font-size:0.7rem;">
+                This land did not pass the cultivated-land validation.<br>
+                Only plots with sufficient vegetation and cropland can be registered.
+              </div>
+            </div>`;
+        }
       }
 
       // ─── Plot Confirmation Handlers ──────────────────
@@ -1931,6 +2002,8 @@
                 polygon_geojson: polygonGeoJSON,
                 kml_data: lastKmlContent,
                 area_acres: lastValidationData.plot_area_acres || 0,
+                cultivated_percentage:
+                  lastValidationData.cultivated_percentage || 100,
                 ndvi_mean: 0,
                 decision: lastValidationData.decision || "",
                 confidence_score: lastValidationData.confidence_score || 0,

@@ -45,6 +45,7 @@ class ConfirmPlotRequest(BaseModel):
     kml_data: str = ""
     # Validation stats (from the previous result)
     area_acres: float = 0.0
+    cultivated_percentage: float = 100.0  # % of plot that is cultivated (green)
     ndvi_mean: float = 0.0
     decision: str = ""
     confidence_score: float = 0.0

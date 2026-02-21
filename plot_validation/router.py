@@ -213,6 +213,14 @@ async def confirm_plot(req: ConfirmPlotRequest):
     4. Creates admin alerts if overlap > threshold.
     """
     try:
+        # Guard: reject non-cultivated plots
+        if req.decision and req.decision.upper() == "FAIL":
+            raise HTTPException(
+                status_code=400,
+                detail="This plot did not pass validation (not cultivated land). "
+                       "Only PASS or REVIEW plots can be saved.",
+            )
+
         # Step 1: Upsert farmer
         farmer = upsert_farmer(
             name=req.farmer_name,
@@ -220,13 +228,22 @@ async def confirm_plot(req: ConfirmPlotRequest):
             email=req.farmer_email,
         )
 
-        # Step 2: Save the plot
+        # Step 2: Compute effective cultivated area
+        #   e.g. 10-acre plot at 70% green → store 7 acres
+        cultivated_pct = max(0.0, min(100.0, req.cultivated_percentage))
+        effective_area = round(req.area_acres * (cultivated_pct / 100.0), 4)
+        logger.info(
+            "Area adjustment: %.2f acres × %.1f%% cultivated = %.4f effective acres",
+            req.area_acres, cultivated_pct, effective_area,
+        )
+
+        # Step 3: Save the plot (with adjusted area)
         plot = save_plot(
             farmer_id=farmer["id"],
             polygon_geojson=req.polygon_geojson,
             kml_data=req.kml_data,
             label=req.plot_label,
-            area_acres=req.area_acres,
+            area_acres=effective_area,
             ndvi_mean=req.ndvi_mean,
             decision=req.decision,
             confidence_score=req.confidence_score,

@@ -21,9 +21,9 @@ _supabase: Client | None = None
 
 # ──────────────────────────────────────────────────────────────
 # Overlap threshold — plots overlapping more than this trigger an alert.
-# 0.30 = 30%.  Change as needed.
+# 0.05 = 5%.  Change as needed.
 # ──────────────────────────────────────────────────────────────
-OVERLAP_THRESHOLD = 0.30
+OVERLAP_THRESHOLD = 0.05
 
 
 def init_supabase() -> Client:
