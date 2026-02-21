@@ -1120,6 +1120,278 @@
         </div>
       </div>
 
+      <!-- ═══ PLOT CONFIRMATION SECTION ═══ -->
+      <div id="confirmSection" style="display: none; margin-top: 2rem">
+        <div
+          style="
+            background: linear-gradient(
+              135deg,
+              rgba(26, 32, 64, 0.85),
+              rgba(20, 26, 46, 0.95)
+            );
+            border: 1px solid rgba(99, 179, 237, 0.15);
+            border-radius: 16px;
+            padding: 1.8rem;
+          "
+        >
+          <!-- Step 1: Ask user -->
+          <div id="confirmPrompt">
+            <div
+              style="
+                font-size: 0.75rem;
+                color: #718096;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                margin-bottom: 0.5rem;
+              "
+            >
+              📌 Plot Confirmation
+            </div>
+            <h3
+              style="color: #e2e8f0; margin-bottom: 0.8rem; font-size: 1.1rem"
+            >
+              Is this your proposed plot?
+            </h3>
+            <p
+              style="color: #a0aec0; font-size: 0.82rem; margin-bottom: 1.2rem"
+            >
+              If you confirm, your plot will be saved and registered to your
+              farmer profile.
+            </p>
+            <div style="display: flex; gap: 1rem">
+              <button
+                id="confirmYesBtn"
+                style="
+                  background: linear-gradient(135deg, #48bb78, #38a169);
+                  color: #fff;
+                  border: none;
+                  padding: 0.7rem 2rem;
+                  border-radius: 10px;
+                  font-weight: 600;
+                  cursor: pointer;
+                  font-size: 0.85rem;
+                  transition:
+                    transform 0.2s,
+                    box-shadow 0.2s;
+                "
+                onmouseover="
+                  this.style.transform = 'translateY(-1px)';
+                  this.style.boxShadow = '0 4px 15px rgba(72,187,120,0.4)';
+                "
+                onmouseout="
+                  this.style.transform = '';
+                  this.style.boxShadow = '';
+                "
+              >
+                ✅ Yes, this is my plot
+              </button>
+              <button
+                id="confirmNoBtn"
+                style="
+                  background: rgba(255, 255, 255, 0.06);
+                  color: #a0aec0;
+                  border: 1px solid rgba(255, 255, 255, 0.1);
+                  padding: 0.7rem 2rem;
+                  border-radius: 10px;
+                  font-weight: 600;
+                  cursor: pointer;
+                  font-size: 0.85rem;
+                  transition: transform 0.2s;
+                "
+                onmouseover="this.style.transform = 'translateY(-1px)'"
+                onmouseout="this.style.transform = ''"
+              >
+                ❌ No, analysis only
+              </button>
+            </div>
+          </div>
+
+          <!-- Step 2: Farmer form (hidden initially) -->
+          <div id="farmerForm" style="display: none">
+            <div
+              style="
+                font-size: 0.75rem;
+                color: #718096;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                margin-bottom: 0.5rem;
+              "
+            >
+              👤 Farmer Registration
+            </div>
+            <h3 style="color: #e2e8f0; margin-bottom: 1rem; font-size: 1.1rem">
+              Enter Your Details
+            </h3>
+            <div
+              style="
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 0.8rem;
+                margin-bottom: 1rem;
+              "
+            >
+              <div>
+                <label
+                  style="
+                    color: #a0aec0;
+                    font-size: 0.72rem;
+                    display: block;
+                    margin-bottom: 0.3rem;
+                  "
+                  >Full Name *</label
+                >
+                <input
+                  id="farmerName"
+                  type="text"
+                  placeholder="Enter your name"
+                  required
+                  style="
+                    width: 100%;
+                    padding: 0.6rem 0.8rem;
+                    background: rgba(255, 255, 255, 0.06);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    border-radius: 8px;
+                    color: #e2e8f0;
+                    font-size: 0.85rem;
+                    outline: none;
+                    transition: border-color 0.2s;
+                  "
+                  onfocus="this.style.borderColor = 'rgba(99,179,237,0.5)'"
+                  onblur="this.style.borderColor = 'rgba(255,255,255,0.1)'"
+                />
+              </div>
+              <div>
+                <label
+                  style="
+                    color: #a0aec0;
+                    font-size: 0.72rem;
+                    display: block;
+                    margin-bottom: 0.3rem;
+                  "
+                  >Phone Number *</label
+                >
+                <input
+                  id="farmerPhone"
+                  type="tel"
+                  placeholder="+91 9876543210"
+                  required
+                  style="
+                    width: 100%;
+                    padding: 0.6rem 0.8rem;
+                    background: rgba(255, 255, 255, 0.06);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    border-radius: 8px;
+                    color: #e2e8f0;
+                    font-size: 0.85rem;
+                    outline: none;
+                    transition: border-color 0.2s;
+                  "
+                  onfocus="this.style.borderColor = 'rgba(99,179,237,0.5)'"
+                  onblur="this.style.borderColor = 'rgba(255,255,255,0.1)'"
+                />
+              </div>
+              <div>
+                <label
+                  style="
+                    color: #a0aec0;
+                    font-size: 0.72rem;
+                    display: block;
+                    margin-bottom: 0.3rem;
+                  "
+                  >Email (optional)</label
+                >
+                <input
+                  id="farmerEmail"
+                  type="email"
+                  placeholder="farmer@email.com"
+                  style="
+                    width: 100%;
+                    padding: 0.6rem 0.8rem;
+                    background: rgba(255, 255, 255, 0.06);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    border-radius: 8px;
+                    color: #e2e8f0;
+                    font-size: 0.85rem;
+                    outline: none;
+                    transition: border-color 0.2s;
+                  "
+                  onfocus="this.style.borderColor = 'rgba(99,179,237,0.5)'"
+                  onblur="this.style.borderColor = 'rgba(255,255,255,0.1)'"
+                />
+              </div>
+              <div>
+                <label
+                  style="
+                    color: #a0aec0;
+                    font-size: 0.72rem;
+                    display: block;
+                    margin-bottom: 0.3rem;
+                  "
+                  >Plot Label (optional)</label
+                >
+                <input
+                  id="plotLabel"
+                  type="text"
+                  placeholder="e.g. Paddy Field North"
+                  style="
+                    width: 100%;
+                    padding: 0.6rem 0.8rem;
+                    background: rgba(255, 255, 255, 0.06);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    border-radius: 8px;
+                    color: #e2e8f0;
+                    font-size: 0.85rem;
+                    outline: none;
+                    transition: border-color 0.2s;
+                  "
+                  onfocus="this.style.borderColor = 'rgba(99,179,237,0.5)'"
+                  onblur="this.style.borderColor = 'rgba(255,255,255,0.1)'"
+                />
+              </div>
+            </div>
+            <button
+              id="savePlotBtn"
+              style="
+                background: linear-gradient(135deg, #667eea, #764ba2);
+                color: #fff;
+                border: none;
+                padding: 0.7rem 2.5rem;
+                border-radius: 10px;
+                font-weight: 600;
+                cursor: pointer;
+                font-size: 0.85rem;
+                transition:
+                  transform 0.2s,
+                  box-shadow 0.2s;
+              "
+              onmouseover="
+                this.style.transform = 'translateY(-1px)';
+                this.style.boxShadow = '0 4px 15px rgba(102,126,234,0.4)';
+              "
+              onmouseout="
+                this.style.transform = '';
+                this.style.boxShadow = '';
+              "
+            >
+              💾 Save & Register Plot
+            </button>
+            <span
+              id="savingSpinner"
+              style="
+                display: none;
+                color: #a0aec0;
+                font-size: 0.8rem;
+                margin-left: 1rem;
+              "
+              >⏳ Saving...</span
+            >
+          </div>
+
+          <!-- Step 3: Result message -->
+          <div id="confirmResult" style="display: none"></div>
+        </div>
+      </div>
+
       <!-- How It Works (shown after results) -->
       <div class="explanation" id="explanation">
         <h2>🔬 How This Classification Works</h2>
@@ -1275,6 +1547,10 @@
         return interval;
       }
 
+      // — Global state for plot confirmation —
+      let lastValidationData = null;
+      let lastKmlContent = "";
+
       // — Submit —
       submitBtn.addEventListener("click", async () => {
         if (!selectedFile) return;
@@ -1286,6 +1562,13 @@
         document
           .querySelectorAll("#stepList li")
           .forEach((li) => (li.className = ""));
+
+        // Read KML file content for later saving
+        try {
+          lastKmlContent = await selectedFile.text();
+        } catch (_) {
+          lastKmlContent = "";
+        }
 
         const stepInterval = animateSteps();
         const formData = new FormData();
@@ -1311,6 +1594,7 @@
           });
           const data = await res.json();
           if (!res.ok) throw new Error(data.detail || "Unknown error");
+          lastValidationData = data; // Store for confirmation
           setTimeout(() => {
             processing.classList.remove("active");
             showResults(data);
@@ -1586,7 +1870,161 @@
         } else {
           document.getElementById("recoSection").style.display = "none";
         }
+
+        // Show plot confirmation section
+        document.getElementById("confirmSection").style.display = "block";
+        document.getElementById("confirmPrompt").style.display = "block";
+        document.getElementById("farmerForm").style.display = "none";
+        document.getElementById("confirmResult").style.display = "none";
       }
+
+      // ─── Plot Confirmation Handlers ──────────────────
+
+      document.getElementById("confirmYesBtn").addEventListener("click", () => {
+        document.getElementById("confirmPrompt").style.display = "none";
+        document.getElementById("farmerForm").style.display = "block";
+      });
+
+      document.getElementById("confirmNoBtn").addEventListener("click", () => {
+        document.getElementById("confirmSection").style.display = "none";
+      });
+
+      document
+        .getElementById("savePlotBtn")
+        .addEventListener("click", async () => {
+          const name = document.getElementById("farmerName").value.trim();
+          const phone = document.getElementById("farmerPhone").value.trim();
+          const email = document.getElementById("farmerEmail").value.trim();
+          const label = document.getElementById("plotLabel").value.trim();
+
+          if (!name || !phone) {
+            alert("Please enter your name and phone number.");
+            return;
+          }
+
+          if (!lastValidationData) {
+            alert("No validation data found. Please validate a plot first.");
+            return;
+          }
+
+          // Build polygon GeoJSON from the coordinates
+          const coords = lastValidationData.polygon_coords;
+          const polygonGeoJSON = {
+            type: "Polygon",
+            coordinates: [coords.map((c) => [c[0], c[1]])],
+          };
+
+          const saveBtn = document.getElementById("savePlotBtn");
+          const spinner = document.getElementById("savingSpinner");
+          saveBtn.disabled = true;
+          spinner.style.display = "inline";
+
+          try {
+            const res = await fetch("/confirm_plot", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                farmer_name: name,
+                farmer_phone: phone,
+                farmer_email: email,
+                plot_label: label,
+                polygon_geojson: polygonGeoJSON,
+                kml_data: lastKmlContent,
+                area_acres: lastValidationData.plot_area_acres || 0,
+                ndvi_mean: 0,
+                decision: lastValidationData.decision || "",
+                confidence_score: lastValidationData.confidence_score || 0,
+              }),
+            });
+
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.detail || "Save failed");
+
+            // Show result
+            document.getElementById("farmerForm").style.display = "none";
+            const resultDiv = document.getElementById("confirmResult");
+            resultDiv.style.display = "block";
+
+            if (data.has_overlap_warning) {
+              let overlapHtml = data.overlaps
+                .map(
+                  (o) => `
+              <div style="background:rgba(255,100,50,0.1);border:1px solid rgba(255,100,50,0.3);border-radius:8px;padding:0.8rem;margin-top:0.5rem">
+                <div style="color:#fc8150;font-weight:600;font-size:0.85rem">⚠️ Overlap: ${(o.overlap_pct * 100).toFixed(1)}%</div>
+                <div style="color:#a0aec0;font-size:0.75rem;margin-top:0.3rem">
+                  Overlaps with plot "${o.existing_plot_label || "Unnamed"}" by farmer ${o.existing_farmer_name || "Unknown"} (${o.existing_farmer_phone || "N/A"})
+                </div>
+              </div>
+            `,
+                )
+                .join("");
+
+              resultDiv.innerHTML = `
+              <div style="text-align:center">
+                <div style="font-size:2rem;margin-bottom:0.5rem">⚠️</div>
+                <h3 style="color:#f6e05e;margin-bottom:0.5rem">Plot Saved — Overlap Detected!</h3>
+                <p style="color:#a0aec0;font-size:0.82rem;margin-bottom:1rem">${data.message}</p>
+                ${overlapHtml}
+                <p style="color:#718096;font-size:0.72rem;margin-top:1rem;font-style:italic">Admin has been notified about this overlap.</p>
+                <a href="mailto:shaanshoukath44@gmail.com?subject=${encodeURIComponent("⚠️ Plot Overlap Report — Plot ID: " + data.plot_id)}&body=${encodeURIComponent(
+                  "OVERLAP REPORT\n\n" +
+                    "New Plot ID: " +
+                    data.plot_id +
+                    "\n" +
+                    "Farmer: " +
+                    document.getElementById("farmerName").value +
+                    "\n" +
+                    "Phone: " +
+                    document.getElementById("farmerPhone").value +
+                    "\n\n" +
+                    "Overlapping Plots:\n" +
+                    data.overlaps
+                      .map(
+                        (o) =>
+                          "  • " +
+                          (o.existing_plot_label || "Unnamed") +
+                          " — " +
+                          (o.overlap_pct * 100).toFixed(1) +
+                          "% overlap (Farmer: " +
+                          (o.existing_farmer_name || "Unknown") +
+                          ", Phone: " +
+                          (o.existing_farmer_phone || "N/A") +
+                          ")",
+                      )
+                      .join("\n") +
+                    "\n\nPlease investigate this overlap.",
+                )}" target="_blank" style="
+                  display:inline-block; margin-top:1rem;
+                  background: linear-gradient(135deg,#e53e3e,#c53030);
+                  color:#fff; border:none; padding:0.7rem 2rem; border-radius:10px;
+                  font-weight:600; cursor:pointer; font-size:0.82rem;
+                  text-decoration:none;
+                  transition: transform 0.2s, box-shadow 0.2s;
+                " onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 15px rgba(229,62,62,0.4)'" onmouseout="this.style.transform='';this.style.boxShadow=''">📧 Report to Admin</a>
+              </div>`;
+            } else {
+              resultDiv.innerHTML = `
+              <div style="text-align:center">
+                <div style="font-size:2rem;margin-bottom:0.5rem">✅</div>
+                <h3 style="color:#68d391;margin-bottom:0.5rem">Plot Saved Successfully!</h3>
+                <p style="color:#a0aec0;font-size:0.82rem">${data.message}</p>
+                <p style="color:#718096;font-size:0.72rem;margin-top:0.8rem">Plot ID: ${data.plot_id}</p>
+              </div>`;
+            }
+          } catch (err) {
+            document.getElementById("farmerForm").style.display = "none";
+            const resultDiv = document.getElementById("confirmResult");
+            resultDiv.style.display = "block";
+            resultDiv.innerHTML = `
+            <div style="text-align:center">
+              <div style="font-size:2rem;margin-bottom:0.5rem">❌</div>
+              <h3 style="color:#fc8181;margin-bottom:0.5rem">Save Failed</h3>
+              <p style="color:#a0aec0;font-size:0.82rem">${err.message}</p>
+            </div>`;
+          }
+          saveBtn.disabled = false;
+          spinner.style.display = "none";
+        });
     </script>
   </body>
 </html>

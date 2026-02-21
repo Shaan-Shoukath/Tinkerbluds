@@ -6,7 +6,9 @@ import logging
 from fastapi import APIRouter, UploadFile, File, Query, HTTPException
 
 from config import SQ_M_PER_ACRE, MAX_FILE_SIZE
-from plot_validation.schemas import ValidationResponse
+from plot_validation.schemas import (
+    ValidationResponse, ConfirmPlotRequest, ConfirmPlotResponse, OverlapInfo,
+)
 from plot_validation.geometry_utils import (
     parse_kml, extract_polygon, validate_geometry, polygon_to_ee_geometry,
 )
@@ -15,6 +17,9 @@ from plot_validation.earth_engine_service import (
 )
 from plot_validation.validation_logic import PlotValidatorStage1
 from plot_validation.yield_service import estimate_yield, integrate_yield_score, recommend_crops
+from plot_validation.supabase_service import (
+    upsert_farmer, save_plot, check_overlap, get_overlap_alerts, resolve_alert,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -191,3 +196,98 @@ async def validate_plot(
 
     logger.info("Validation result: decision=%s", result["decision"])
     return result
+
+
+# ──────────────────────────────────────────────────────────────
+# POST /confirm_plot — Save farmer + plot to Supabase + overlap check
+# ──────────────────────────────────────────────────────────────
+
+@router.post("/confirm_plot", response_model=ConfirmPlotResponse)
+async def confirm_plot(req: ConfirmPlotRequest):
+    """
+    Called when the user confirms "Yes, this is my plot".
+
+    1. Upserts the farmer (by phone number).
+    2. Saves the plot polygon + KML to Supabase.
+    3. Checks for overlaps with all existing plots.
+    4. Creates admin alerts if overlap > threshold.
+    """
+    try:
+        # Step 1: Upsert farmer
+        farmer = upsert_farmer(
+            name=req.farmer_name,
+            phone=req.farmer_phone,
+            email=req.farmer_email,
+        )
+
+        # Step 2: Save the plot
+        plot = save_plot(
+            farmer_id=farmer["id"],
+            polygon_geojson=req.polygon_geojson,
+            kml_data=req.kml_data,
+            label=req.plot_label,
+            area_acres=req.area_acres,
+            ndvi_mean=req.ndvi_mean,
+            decision=req.decision,
+            confidence_score=req.confidence_score,
+        )
+
+        # Step 3: Check for overlaps
+        overlaps = check_overlap(
+            new_polygon_geojson=req.polygon_geojson,
+            new_plot_id=plot["id"],
+        )
+
+        overlap_list = [
+            OverlapInfo(
+                existing_plot_id=o["existing_plot_id"],
+                existing_plot_label=o.get("existing_plot_label", ""),
+                existing_farmer_name=o.get("existing_farmer_name", ""),
+                existing_farmer_phone=o.get("existing_farmer_phone", ""),
+                overlap_pct=o["overlap_pct"],
+            )
+            for o in overlaps
+        ]
+
+        msg = "Plot saved successfully!"
+        if overlap_list:
+            msg = f"Plot saved — ⚠️ {len(overlap_list)} overlap(s) detected! Admin has been alerted."
+
+        return ConfirmPlotResponse(
+            success=True,
+            farmer_id=farmer["id"],
+            plot_id=plot["id"],
+            message=msg,
+            overlaps=overlap_list,
+            has_overlap_warning=len(overlap_list) > 0,
+        )
+
+    except Exception as e:
+        logger.error("confirm_plot failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ──────────────────────────────────────────────────────────────
+# GET /admin/alerts — List unresolved overlap alerts
+# ──────────────────────────────────────────────────────────────
+
+@router.get("/admin/alerts")
+async def admin_alerts(resolved: bool = Query(False)):
+    """List overlap alerts. Default: unresolved only."""
+    try:
+        alerts = get_overlap_alerts(resolved=resolved)
+        return {"alerts": alerts, "count": len(alerts)}
+    except Exception as e:
+        logger.error("admin_alerts failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/admin/alerts/{alert_id}/resolve")
+async def resolve_overlap_alert(alert_id: str):
+    """Mark an overlap alert as resolved."""
+    try:
+        result = resolve_alert(alert_id)
+        return {"success": True, "alert": result}
+    except Exception as e:
+        logger.error("resolve_alert failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))

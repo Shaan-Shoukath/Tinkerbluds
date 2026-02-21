@@ -11,3 +11,4 @@ uvicorn[standard]
 earthengine-api
 pydantic
 python-multipart
+supabase

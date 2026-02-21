@@ -7,6 +7,8 @@ Usage:
 
 import logging
 from pathlib import Path
+from dotenv import load_dotenv
+load_dotenv()  # Load .env before any module reads os.getenv()
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
