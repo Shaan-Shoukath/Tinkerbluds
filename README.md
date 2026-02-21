@@ -1,35 +1,42 @@
-# Tinkerbluds – Cultivated Land Validator
+# Tinkerbluds
 
-REST API that validates cultivated land inside a user-uploaded KML plot using **Google Earth Engine** (Sentinel-2 + ESA WorldCover).
+Cultivated land validation platform powered by **Google Earth Engine**, **Sentinel-2** satellite imagery, and **ESA WorldCover** land classification.
 
-## Setup
+Upload a KML polygon → get an instant analysis of cropland presence, vegetation health, and land class breakdown — with an interactive map preview.
 
-### 1. Install dependencies
+---
+
+## Quick Start
 
 ```bash
+# 1. Install dependencies
 pip install -r requirements.txt
-```
 
-### 2. Authenticate Earth Engine
-
-```bash
+# 2. Authenticate Earth Engine
 earthengine authenticate
-```
 
-### 3. Configure `.env`
+# 3. Configure .env
+echo "EE_PROJECT_ID=your-gee-project-id" > .env
 
-```env
-EE_PROJECT_ID=your-gee-project-id
-GOOGLE_MAPS_API_KEY=your-google-maps-key   # only for data_pull.py
-```
-
-### 4. Run the server
-
-```bash
+# 4. Run the server
 uvicorn main:app --reload
 ```
 
-Server starts at `http://localhost:8000` — docs at `http://localhost:8000/docs`.
+Open `http://localhost:8000` for the dashboard, or `http://localhost:8000/docs` for the API docs.
+
+---
+
+## Features
+
+| Feature                  | Description                                                    |
+| ------------------------ | -------------------------------------------------------------- |
+| **KML Upload**           | Parse any KML polygon file                                     |
+| **NDVI Analysis**        | Sentinel-2 vegetation index with configurable threshold (0.3)  |
+| **Crop Detection**       | ESA WorldCover cropland classification (class 40)              |
+| **Land Class Breakdown** | Per-class area chart (Trees, Cropland, Built-up, etc.)         |
+| **Month Range Filter**   | Analyze specific growing seasons (e.g. Jan–Mar)                |
+| **Map Preview**          | Interactive Leaflet map with satellite tiles + polygon overlay |
+| **PASS/REVIEW Decision** | Automated validation based on cultivated percentage            |
 
 ---
 
@@ -40,28 +47,24 @@ Server starts at `http://localhost:8000` — docs at `http://localhost:8000/docs
 | Parameter         | Type       | Default    | Description                        |
 | ----------------- | ---------- | ---------- | ---------------------------------- |
 | `file`            | KML upload | _required_ | Plot polygon KML file              |
-| `year`            | int        | 2024       | Satellite imagery year (2015–2025) |
+| `year`            | int        | 2024       | Satellite imagery year (2015–2026) |
+| `start_month`     | int        | 1          | Start month (1–12)                 |
+| `end_month`       | int        | 12         | End month (1–12)                   |
 | `cloud_threshold` | int        | 20         | Max cloud cover %                  |
 
-**Example request:**
-
-```bash
-curl -X POST http://localhost:8000/validate_plot \
-  -F "file=@plot.kml" \
-  -F "year=2024" \
-  -F "cloud_threshold=20"
-```
-
-**Example response:**
+**Response:**
 
 ```json
 {
-  "plot_area_sq_m": 18543.21,
-  "cropland_area_sq_m": 12050.88,
-  "active_vegetation_area_sq_m": 15200.5,
-  "cultivated_percentage": 64.99,
-  "decision": "PASS",
-  "confidence_score": 0.6149
+  "plot_area_acres": 5.54,
+  "cropland_area_acres": 0.00,
+  "active_vegetation_area_acres": 4.24,
+  "cultivated_percentage": 0.0,
+  "decision": "REVIEW",
+  "confidence_score": 0.11,
+  "dominant_class": "Trees",
+  "land_classes": { "Trees": 4.44, "Built-up": 1.08, "Grassland": 0.02 },
+  "polygon_coords": [[10.047, 76.328], ...]
 }
 ```
 
@@ -70,16 +73,36 @@ curl -X POST http://localhost:8000/validate_plot \
 ## Project Structure
 
 ```
-main.py                  FastAPI entrypoint
-geometry_utils.py        KML → polygon → EE geometry
-earth_engine_service.py  Sentinel-2, NDVI, WorldCover
-validation_logic.py      Stage-1 scoring & decision
-data_pull.py             Standalone satellite image puller
-segmentation.py          Local HSV green mask (non-API)
+Tinkerbluds/
+├── main.py                           ← App entrypoint + router include
+├── config.py                         ← Shared constants
+├── plot_validation/                  ← Plot validation package
+│   ├── router.py                     ← /validate_plot endpoint
+│   ├── schemas.py                    ← Pydantic response models
+│   ├── earth_engine_service.py       ← EE processing pipeline
+│   ├── geometry_utils.py             ← KML parsing + geometry
+│   └── validation_logic.py           ← Scoring + decision
+├── static/index.html                 ← Dashboard UI
+├── developers_debug/                 ← Developer documentation
+│   ├── 01_architecture.md
+│   ├── 02_kml_geometry.md
+│   ├── 03_earth_engine_pipeline.md
+│   ├── 04_validation_scoring.md
+│   └── 05_dashboard_frontend.md
+├── requirements.txt
+└── .env
 ```
+
+---
 
 ## Decision Logic
 
-- **cultivated_percentage** = cultivated area / plot area × 100
-- **confidence_score** = 0.7 × cultivated% + 0.3 × mean NDVI
+- **Cultivated %** = (Cropland ∩ Active Vegetation) / Plot Area × 100
+- **Confidence** = 0.7 × cultivated% + 0.3 × mean NDVI
 - **PASS** if cultivated% > 60%, else **REVIEW**
+
+---
+
+## For Developers
+
+See [`developers_debug/`](developers_debug/) for detailed documentation on each module, including data flow diagrams, function-by-function explanations, library comparisons, and reasoning behind every design decision.

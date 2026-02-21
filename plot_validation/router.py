@@ -10,7 +10,7 @@ from plot_validation.schemas import ValidationResponse
 from plot_validation.geometry_utils import (
     parse_kml, extract_polygon, validate_geometry, polygon_to_ee_geometry,
 )
-from plot_validation.earth_engine_service import compute_cultivated_stats
+from plot_validation.earth_engine_service import compute_cultivated_stats, generate_thumbnails
 from plot_validation.validation_logic import PlotValidatorStage1
 
 logger = logging.getLogger(__name__)
@@ -118,5 +118,23 @@ async def validate_plot(
         [c[1], c[0]] for c in polygon.exterior.coords
     ]
 
-    logger.info("Validation result: %s", result)
+    # ── 7. Generate satellite + green mask thumbnails ──
+    try:
+        thumbs = generate_thumbnails(
+            ee_region,
+            year=year,
+            start_month=start_month,
+            end_month=end_month,
+            cloud_threshold=cloud_threshold,
+        )
+        result["satellite_thumbnail"] = thumbs["satellite_b64"]
+        result["green_mask_thumbnail"] = thumbs["green_mask_b64"]
+        result["green_area_acres"] = round(thumbs["green_area_sq_m"] / SQ_M_PER_ACRE, 4)
+    except Exception as e:
+        logger.warning("Thumbnail generation failed (non-fatal): %s", e)
+        result["satellite_thumbnail"] = ""
+        result["green_mask_thumbnail"] = ""
+        result["green_area_acres"] = 0.0
+
+    logger.info("Validation result: decision=%s", result["decision"])
     return result

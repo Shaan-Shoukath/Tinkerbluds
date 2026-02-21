@@ -15,3 +15,6 @@ class ValidationResponse(BaseModel):
     dominant_class: str
     land_classes: dict
     polygon_coords: list
+    satellite_thumbnail: str = ""
+    green_mask_thumbnail: str = ""
+    green_area_acres: float = 0.0

@@ -712,6 +712,93 @@
         </div>
       </div>
 
+      <!-- Satellite & Green Mask Preview -->
+      <div id="previewSection" style="margin-top: 2rem; display: none">
+        <div
+          style="
+            background: linear-gradient(145deg, #141a2e, #1a2040);
+            border: 1px solid rgba(99, 179, 237, 0.08);
+            border-radius: 12px;
+            padding: 1.2rem;
+          "
+        >
+          <div
+            style="
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              margin-bottom: 0.8rem;
+            "
+          >
+            <div
+              style="
+                font-size: 0.72rem;
+                color: #718096;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+              "
+            >
+              Satellite Preview
+            </div>
+            <div
+              id="greenAreaBadge"
+              style="
+                background: rgba(72, 187, 120, 0.15);
+                color: #68d391;
+                padding: 0.3rem 0.8rem;
+                border-radius: 20px;
+                font-size: 0.8rem;
+                font-weight: 600;
+              "
+            ></div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem">
+            <div>
+              <div
+                style="
+                  font-size: 0.7rem;
+                  color: #a0aec0;
+                  margin-bottom: 0.4rem;
+                  text-align: center;
+                "
+              >
+                True Color
+              </div>
+              <img
+                id="satelliteImg"
+                style="
+                  width: 100%;
+                  border-radius: 8px;
+                  border: 1px solid rgba(99, 179, 237, 0.1);
+                "
+                alt="Satellite view"
+              />
+            </div>
+            <div>
+              <div
+                style="
+                  font-size: 0.7rem;
+                  color: #68d391;
+                  margin-bottom: 0.4rem;
+                  text-align: center;
+                "
+              >
+                Green Vegetation Mask
+              </div>
+              <img
+                id="greenMaskImg"
+                style="
+                  width: 100%;
+                  border-radius: 8px;
+                  border: 1px solid rgba(104, 211, 145, 0.2);
+                "
+                alt="Green mask"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Results -->
       <div class="results" id="results">
         <div class="result-header">
@@ -1076,6 +1163,19 @@
             fillOpacity: 0.15,
           }).addTo(mapInstance);
           mapInstance.fitBounds(poly.getBounds().pad(0.3));
+        }
+
+        // Satellite + Green mask preview
+        if (data.satellite_thumbnail && data.green_mask_thumbnail) {
+          document.getElementById("previewSection").style.display = "block";
+          document.getElementById("satelliteImg").src =
+            "data:image/png;base64," + data.satellite_thumbnail;
+          document.getElementById("greenMaskImg").src =
+            "data:image/png;base64," + data.green_mask_thumbnail;
+          document.getElementById("greenAreaBadge").textContent =
+            "🌿 Green Area: " + data.green_area_acres.toFixed(2) + " acres";
+        } else {
+          document.getElementById("previewSection").style.display = "none";
         }
       }
     </script>

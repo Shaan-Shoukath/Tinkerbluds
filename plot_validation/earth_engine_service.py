@@ -5,7 +5,9 @@ composites, NDVI computation, ESA WorldCover cropland masking, and area stats.
 
 import os
 import logging
+import base64
 import ee
+import requests as http_requests
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
@@ -232,6 +234,92 @@ def compute_cultivated_stats(
         "cultivated_area_sq_m":        results.get("cultivated_area") or 0.0,
         "mean_ndvi":                   results.get("mean_ndvi") or 0.0,
         "land_classes_sq_m":           land_classes,
+    }
+
+
+def generate_thumbnails(
+    region: ee.Geometry,
+    composite: ee.Image = None,
+    ndvi: ee.Image = None,
+    year: int = 2024,
+    start_month: int = 1,
+    end_month: int = 12,
+    cloud_threshold: int = 20,
+    ndvi_threshold: float = 0.3,
+    thumb_width: int = 512,
+) -> dict:
+    """
+    Generate satellite + green mask thumbnails for the polygon.
+
+    Returns dict with:
+      - satellite_b64: base64 PNG of true-color satellite image
+      - green_mask_b64: base64 PNG of green vegetation overlay
+      - green_area_sq_m: area of NDVI > threshold in m²
+    """
+    init_ee()
+
+    # Build composite/NDVI if not provided
+    if composite is None:
+        composite = get_sentinel2_composite(region, year, start_month, end_month, cloud_threshold)
+    if ndvi is None:
+        ndvi = compute_ndvi(composite)
+
+    # ── True-color thumbnail (B4=Red, B3=Green, B2=Blue) ──
+    rgb_vis = {
+        "bands": ["B4", "B3", "B2"],
+        "min": 0,
+        "max": 3000,
+        "dimensions": thumb_width,
+        "region": region,
+        "format": "png",
+    }
+    rgb_url = composite.getThumbURL(rgb_vis)
+    logger.info("Fetching satellite thumbnail: %s", rgb_url)
+    rgb_response = http_requests.get(rgb_url, timeout=60)
+    satellite_b64 = base64.b64encode(rgb_response.content).decode("utf-8")
+
+    # ── Green mask thumbnail ──
+    # Paint green areas (NDVI > threshold) as bright green on a dimmed background
+    active_veg = ndvi.gt(ndvi_threshold)
+
+    # Dimmed base: reduce brightness by 40%
+    dimmed = composite.select(["B4", "B3", "B2"]).multiply(0.4)
+
+    # Full-brightness where green
+    bright = composite.select(["B4", "B3", "B2"])
+
+    # Merge: green areas get a green tint overlay
+    green_tint = ee.Image.constant([0, 2500, 0]).rename(["B4", "B3", "B2"])
+    highlighted = dimmed.where(active_veg, bright.add(green_tint).min(5000))
+
+    mask_vis = {
+        "bands": ["B4", "B3", "B2"],
+        "min": 0,
+        "max": 4000,
+        "dimensions": thumb_width,
+        "region": region,
+        "format": "png",
+    }
+    mask_url = highlighted.getThumbURL(mask_vis)
+    logger.info("Fetching green mask thumbnail: %s", mask_url)
+    mask_response = http_requests.get(mask_url, timeout=60)
+    green_mask_b64 = base64.b64encode(mask_response.content).decode("utf-8")
+
+    # ── Green area calculation ──
+    pixel_area = ee.Image.pixelArea()
+    green_area = pixel_area.updateMask(active_veg).reduceRegion(
+        reducer=ee.Reducer.sum(),
+        geometry=region,
+        scale=10,
+        maxPixels=1e9,
+    ).get("area")
+
+    green_area_val = ee.Number(green_area).getInfo() or 0.0
+
+    return {
+        "satellite_b64": satellite_b64,
+        "green_mask_b64": green_mask_b64,
+        "green_area_sq_m": round(green_area_val, 2),
     }
 
 
