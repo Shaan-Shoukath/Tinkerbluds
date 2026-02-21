@@ -35,6 +35,8 @@ How all the pieces fit together — from KML upload to JSON response.
  │  │ 1. geometry_utils  →  parse KML to polygon  │
  │  │ 2. earth_engine    →  send graph to Google   │
  │  │ 3. validation      →  score + decide         │
+ │  │ 4. thumbnails      →  satellite + green mask  │
+ │  │ 5. yield_service   →  weather + crop yield    │
  │  └─────────────────────────────────────────────┘
  │       │
  │  JSON response
@@ -62,7 +64,13 @@ When a user uploads `field.kml`:
    h. Sends entire graph to Google via .getInfo() ← ONLY network call
 5. validation_logic.py calculates cultivated %, confidence, decision
 6. Router converts m² to acres, extracts polygon coords
-7. JSON response returned to browser
+7. earth_engine_service.py generates satellite + green mask thumbnails
+8. If claimed_crop is provided:
+   a. yield_service.py fetches last 90 days of weather from Open-Meteo
+   b. Compares actual vs ideal conditions for the claimed crop
+   c. Estimates yield and computes feasibility score
+   d. Integrates yield score into overall confidence
+9. JSON response returned to browser
 ```
 
 **Key insight:** Steps 4a–4g build a _computation graph_ locally (no data moves). Only step 4h triggers actual satellite processing on Google's servers. This is called **lazy evaluation**.
@@ -74,10 +82,11 @@ When a user uploads `field.kml`:
 ```
 main.py
   └── plot_validation/router.py
-        ├── plot_validation/schemas.py        (Pydantic models)
-        ├── plot_validation/geometry_utils.py  (KML → Shapely → EE)
-        ├── plot_validation/earth_engine_service.py  (EE pipeline)
-        ├── plot_validation/validation_logic.py (scoring)
+        ├── plot_validation/schemas.py              (Pydantic models)
+        ├── plot_validation/geometry_utils.py        (KML → Shapely → EE)
+        ├── plot_validation/earth_engine_service.py  (EE pipeline + thumbnails)
+        ├── plot_validation/validation_logic.py      (scoring)
+        ├── plot_validation/yield_service.py         (crop dataset + Open-Meteo)
         └── config.py  (constants)
 ```
 
@@ -95,4 +104,5 @@ main.py
 | **Shapely**              | Geometry objects | Polygon creation, validation, coordinate extraction              |
 | **Fiona**                | File I/O         | Backend for geopandas KML reading                                |
 | **python-dotenv**        | Config           | Load `.env` variables without hardcoding secrets                 |
+| **requests**             | HTTP client      | Fetch EE thumbnails + Open-Meteo weather API                     |
 | **Leaflet.js**           | Map rendering    | Lightweight, open-source map library for the dashboard           |

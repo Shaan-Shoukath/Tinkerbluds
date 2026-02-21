@@ -10,8 +10,11 @@ from plot_validation.schemas import ValidationResponse
 from plot_validation.geometry_utils import (
     parse_kml, extract_polygon, validate_geometry, polygon_to_ee_geometry,
 )
-from plot_validation.earth_engine_service import compute_cultivated_stats, generate_thumbnails
+from plot_validation.earth_engine_service import (
+    compute_cultivated_stats, generate_thumbnails,
+)
 from plot_validation.validation_logic import PlotValidatorStage1
+from plot_validation.yield_service import estimate_yield, integrate_yield_score
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +28,7 @@ async def validate_plot(
     start_month: int = Query(1, ge=1, le=12, description="Start month (1-12)"),
     end_month: int = Query(12, ge=1, le=12, description="End month (1-12)"),
     cloud_threshold: int = Query(20, ge=1, le=100, description="Max cloud cover %"),
+    claimed_crop: str = Query("", description="Crop claimed by farmer (e.g. rice, wheat)"),
 ):
     """
     Upload a KML file containing a plot polygon.
@@ -135,6 +139,39 @@ async def validate_plot(
         result["satellite_thumbnail"] = ""
         result["green_mask_thumbnail"] = ""
         result["green_area_acres"] = 0.0
+
+    # ── 8. Yield Feasibility (only if crop is claimed) ──
+    if claimed_crop.strip():
+        try:
+            centroid = polygon.centroid
+            plot_area_hectares = result["plot_area_acres"] * 0.404686
+            mean_ndvi = area_stats.get("mean_ndvi", 0.0)
+
+            yield_result = estimate_yield(
+                claimed_crop=claimed_crop,
+                mean_ndvi=mean_ndvi,
+                lat=centroid.y,
+                lon=centroid.x,
+                plot_area_hectares=plot_area_hectares,
+            )
+
+            result["claimed_crop"] = yield_result["claimed_crop"]
+            result["estimated_yield_ton_per_hectare"] = yield_result["estimated_yield_ton_per_hectare"]
+            result["total_estimated_yield_tons"] = yield_result["total_estimated_yield_tons"]
+            result["yield_feasibility_score"] = yield_result["yield_feasibility_score"]
+            result["yield_confidence"] = yield_result["yield_confidence"]
+            result["weather_actual"] = yield_result["weather_actual"]
+            result["crop_ideal"] = yield_result["crop_ideal"]
+            result["parameter_scores"] = yield_result["parameter_scores"]
+
+            # Integrate into overall confidence
+            result["confidence_score"] = integrate_yield_score(
+                result["confidence_score"], yield_result["yield_feasibility_score"],
+            )
+
+            logger.info("Yield estimate: %s", yield_result["yield_confidence"])
+        except Exception as e:
+            logger.warning("Yield estimation failed (non-fatal): %s", e)
 
     logger.info("Validation result: decision=%s", result["decision"])
     return result

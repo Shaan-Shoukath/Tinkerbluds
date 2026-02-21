@@ -659,6 +659,32 @@
             <label>Cloud %</label>
             <input type="number" id="cloudInput" value="20" min="1" max="100" />
           </div>
+          <div class="option-group">
+            <label>Claimed Crop</label>
+            <select id="cropInput">
+              <option value="">— None —</option>
+              <option value="rice">Rice</option>
+              <option value="wheat">Wheat</option>
+              <option value="maize">Maize</option>
+              <option value="sugarcane">Sugarcane</option>
+              <option value="cotton">Cotton</option>
+              <option value="coconut">Coconut</option>
+              <option value="rubber">Rubber</option>
+              <option value="tea">Tea</option>
+              <option value="coffee">Coffee</option>
+              <option value="banana">Banana</option>
+              <option value="potato">Potato</option>
+              <option value="soybean">Soybean</option>
+              <option value="groundnut">Groundnut</option>
+              <option value="mustard">Mustard</option>
+              <option value="onion">Onion</option>
+              <option value="tomato">Tomato</option>
+              <option value="pepper">Pepper</option>
+              <option value="cardamom">Cardamom</option>
+              <option value="turmeric">Turmeric</option>
+              <option value="ginger">Ginger</option>
+            </select>
+          </div>
         </div>
         <button class="submit-btn" id="submitBtn" disabled>
           Validate Plot
@@ -858,6 +884,189 @@
         </div>
       </div>
 
+      <!-- Yield Feasibility -->
+      <div id="yieldSection" style="display: none; margin-top: 2rem">
+        <div
+          style="
+            background: linear-gradient(145deg, #141a2e, #1a2040);
+            border: 1px solid rgba(99, 179, 237, 0.08);
+            border-radius: 12px;
+            padding: 1.2rem;
+          "
+        >
+          <div
+            style="
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              margin-bottom: 1rem;
+            "
+          >
+            <div
+              style="
+                font-size: 0.72rem;
+                color: #718096;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+              "
+            >
+              🌾 Yield Feasibility
+            </div>
+            <div
+              id="yieldConfBadge"
+              style="
+                padding: 0.3rem 0.8rem;
+                border-radius: 20px;
+                font-size: 0.75rem;
+                font-weight: 700;
+              "
+            ></div>
+          </div>
+
+          <!-- Yield summary row -->
+          <div
+            style="
+              display: grid;
+              grid-template-columns: 1fr 1fr 1fr;
+              gap: 1rem;
+              margin-bottom: 1.2rem;
+            "
+          >
+            <div style="text-align: center">
+              <div
+                style="
+                  font-size: 0.6rem;
+                  color: #718096;
+                  text-transform: uppercase;
+                  margin-bottom: 0.3rem;
+                "
+              >
+                Crop
+              </div>
+              <div
+                id="yieldCrop"
+                style="
+                  font-size: 1.1rem;
+                  font-weight: 700;
+                  color: #f6e05e;
+                  text-transform: capitalize;
+                "
+              >
+                —
+              </div>
+            </div>
+            <div style="text-align: center">
+              <div
+                style="
+                  font-size: 0.6rem;
+                  color: #718096;
+                  text-transform: uppercase;
+                  margin-bottom: 0.3rem;
+                "
+              >
+                Est. Yield
+              </div>
+              <div
+                id="yieldEst"
+                style="font-size: 1.1rem; font-weight: 700; color: #e2e8f0"
+              >
+                —
+              </div>
+              <div style="font-size: 0.55rem; color: #718096">
+                ton / hectare
+              </div>
+            </div>
+            <div style="text-align: center">
+              <div
+                style="
+                  font-size: 0.6rem;
+                  color: #718096;
+                  text-transform: uppercase;
+                  margin-bottom: 0.3rem;
+                "
+              >
+                Total Yield
+              </div>
+              <div
+                id="yieldTotal"
+                style="font-size: 1.1rem; font-weight: 700; color: #e2e8f0"
+              >
+                —
+              </div>
+              <div style="font-size: 0.55rem; color: #718096">
+                tons (approx)
+              </div>
+            </div>
+          </div>
+
+          <!-- Weather comparison table -->
+          <div id="weatherComparison" style="display: none">
+            <div
+              style="
+                font-size: 0.65rem;
+                color: #718096;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                margin-bottom: 0.4rem;
+              "
+            >
+              Actual vs Ideal Conditions (Last 90 Days)
+            </div>
+            <div
+              id="weatherPeriod"
+              style="font-size: 0.58rem; color: #4a5568; margin-bottom: 0.6rem"
+            ></div>
+            <div id="comparisonRows"></div>
+          </div>
+
+          <!-- Overall feasibility bar -->
+          <div style="margin-top: 1rem">
+            <div
+              style="
+                display: flex;
+                justify-content: space-between;
+                font-size: 0.7rem;
+                color: #a0aec0;
+                margin-bottom: 0.3rem;
+              "
+            >
+              <span>Overall Feasibility</span>
+              <span id="yieldFeasVal">0%</span>
+            </div>
+            <div
+              style="
+                height: 8px;
+                background: rgba(255, 255, 255, 0.06);
+                border-radius: 4px;
+                overflow: hidden;
+              "
+            >
+              <div
+                id="yieldFeasBar"
+                style="
+                  height: 100%;
+                  width: 0%;
+                  border-radius: 4px;
+                  transition: width 0.8s ease;
+                  background: linear-gradient(90deg, #ed8936, #48bb78);
+                "
+              ></div>
+            </div>
+          </div>
+          <div
+            style="
+              margin-top: 0.8rem;
+              font-size: 0.6rem;
+              color: #718096;
+              font-style: italic;
+            "
+          >
+            ⚠ Indicative estimate — actual yields depend on irrigation, soil,
+            farming practices. Weather: Open-Meteo API.
+          </div>
+        </div>
+      </div>
+
       <!-- How It Works (shown after results) -->
       <div class="explanation" id="explanation">
         <h2>🔬 How This Classification Works</h2>
@@ -1032,15 +1241,15 @@
         const sm = document.getElementById("startMonth").value;
         const em = document.getElementById("endMonth").value;
         const cloud = document.getElementById("cloudInput").value;
+        const crop = document.getElementById("cropInput").value;
 
         try {
-          const res = await fetch(
-            `/validate_plot?year=${year}&start_month=${sm}&end_month=${em}&cloud_threshold=${cloud}`,
-            {
-              method: "POST",
-              body: formData,
-            },
-          );
+          let url = `/validate_plot?year=${year}&start_month=${sm}&end_month=${em}&cloud_threshold=${cloud}`;
+          if (crop) url += `&claimed_crop=${encodeURIComponent(crop)}`;
+          const res = await fetch(url, {
+            method: "POST",
+            body: formData,
+          });
           clearInterval(stepInterval);
           document.querySelectorAll("#stepList li").forEach((li) => {
             li.classList.remove("active");
@@ -1176,6 +1385,97 @@
             "🌿 Green Area: " + data.green_area_acres.toFixed(2) + " acres";
         } else {
           document.getElementById("previewSection").style.display = "none";
+        }
+
+        // Yield Feasibility
+        if (data.claimed_crop && data.yield_confidence) {
+          document.getElementById("yieldSection").style.display = "block";
+          document.getElementById("yieldCrop").textContent = data.claimed_crop;
+          document.getElementById("yieldEst").textContent =
+            data.estimated_yield_ton_per_hectare.toFixed(2);
+          document.getElementById("yieldTotal").textContent =
+            data.total_estimated_yield_tons.toFixed(2);
+          const feasPct = (data.yield_feasibility_score * 100).toFixed(0);
+          document.getElementById("yieldFeasVal").textContent = feasPct + "%";
+          document.getElementById("yieldFeasBar").style.width = feasPct + "%";
+
+          const confBadge = document.getElementById("yieldConfBadge");
+          confBadge.textContent = data.yield_confidence;
+          if (data.yield_confidence === "HIGH") {
+            confBadge.style.background = "rgba(72,187,120,0.15)";
+            confBadge.style.color = "#68d391";
+          } else if (data.yield_confidence === "MODERATE") {
+            confBadge.style.background = "rgba(246,224,94,0.15)";
+            confBadge.style.color = "#f6e05e";
+          } else {
+            confBadge.style.background = "rgba(252,129,74,0.15)";
+            confBadge.style.color = "#fc8150";
+          }
+
+          // Weather comparison table
+          if (data.weather_actual && data.parameter_scores) {
+            document.getElementById("weatherComparison").style.display =
+              "block";
+            document.getElementById("weatherPeriod").textContent =
+              "📅 " +
+              (data.weather_actual.period || "") +
+              " (" +
+              (data.weather_actual.days_sampled || 0) +
+              " days)";
+
+            const rows = [
+              {
+                label: "🌡️ Temperature",
+                actual: data.weather_actual.avg_temp_c + " °C",
+                ideal: data.crop_ideal.temp_range_c + " °C",
+                score: data.parameter_scores.temperature,
+              },
+              {
+                label: "🌧️ Rainfall",
+                actual: data.weather_actual.total_rainfall_mm + " mm",
+                ideal: data.crop_ideal.rainfall_range_mm + " mm",
+                score: data.parameter_scores.rainfall,
+              },
+              {
+                label: "💧 Humidity",
+                actual: data.weather_actual.avg_humidity_pct + " %",
+                ideal: data.crop_ideal.humidity_range_pct + " %",
+                score: data.parameter_scores.humidity,
+              },
+              {
+                label: "🌿 Vegetation",
+                actual: "NDVI from satellite",
+                ideal: "≥ 0.3 optimal",
+                score: data.parameter_scores.vegetation,
+              },
+            ];
+
+            let html = "";
+            rows.forEach((r) => {
+              const pct = (r.score * 100).toFixed(0);
+              const color =
+                r.score >= 0.7
+                  ? "#68d391"
+                  : r.score >= 0.4
+                    ? "#f6e05e"
+                    : "#fc8150";
+              html += `
+                <div style="display:grid; grid-template-columns:1.3fr 1fr 1fr 1.2fr; gap:0.5rem; align-items:center; padding:0.45rem 0; border-bottom:1px solid rgba(255,255,255,0.04); font-size:0.7rem;">
+                  <div style="color:#cbd5e0; font-weight:500;">${r.label}</div>
+                  <div style="color:#e2e8f0; text-align:center;">${r.actual}</div>
+                  <div style="color:#718096; text-align:center; font-size:0.62rem;">${r.ideal}</div>
+                  <div style="display:flex; align-items:center; gap:0.4rem;">
+                    <div style="flex:1; height:6px; background:rgba(255,255,255,0.06); border-radius:3px; overflow:hidden;">
+                      <div style="height:100%; width:${pct}%; background:${color}; border-radius:3px; transition:width 0.6s ease;"></div>
+                    </div>
+                    <span style="color:${color}; font-size:0.65rem; font-weight:600; min-width:2rem; text-align:right;">${pct}%</span>
+                  </div>
+                </div>`;
+            });
+            document.getElementById("comparisonRows").innerHTML = html;
+          }
+        } else {
+          document.getElementById("yieldSection").style.display = "none";
         }
       }
     </script>

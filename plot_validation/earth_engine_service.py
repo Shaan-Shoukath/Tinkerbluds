@@ -279,21 +279,25 @@ def generate_thumbnails(
     satellite_b64 = base64.b64encode(rgb_response.content).decode("utf-8")
 
     # ── Green mask thumbnail ──
-    # Paint green areas (NDVI > threshold) as bright green on a dimmed background
+    # Binary mask: SOLID GREEN for NDVI > threshold, dark greyscale otherwise.
     active_veg = ndvi.gt(ndvi_threshold)
 
-    # Dimmed base: reduce brightness by 40%
-    dimmed = composite.select(["B4", "B3", "B2"]).multiply(0.4)
+    # Dark greyscale base from the RGB bands
+    grey = composite.select(["B4", "B3", "B2"]).reduce(ee.Reducer.mean())
+    dark_base = ee.Image.cat(
+        grey.multiply(0.25), grey.multiply(0.25), grey.multiply(0.25),
+    ).rename(["vis-red", "vis-green", "vis-blue"])
 
-    # Full-brightness where green
-    bright = composite.select(["B4", "B3", "B2"])
+    # Solid green overlay (bright enough to stand out clearly)
+    solid_green = ee.Image.constant([400, 3200, 400]).rename(
+        ["vis-red", "vis-green", "vis-blue"],
+    )
 
-    # Merge: green areas get a green tint overlay
-    green_tint = ee.Image.constant([0, 2500, 0]).rename(["B4", "B3", "B2"])
-    highlighted = dimmed.where(active_veg, bright.add(green_tint).min(5000))
+    # Where vegetation is active → solid green; otherwise → dark greyscale
+    highlighted = dark_base.where(active_veg, solid_green).clip(region)
 
     mask_vis = {
-        "bands": ["B4", "B3", "B2"],
+        "bands": ["vis-red", "vis-green", "vis-blue"],
         "min": 0,
         "max": 4000,
         "dimensions": thumb_width,
