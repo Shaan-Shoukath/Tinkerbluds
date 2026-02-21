@@ -58,6 +58,9 @@ class ValidationResponse(BaseModel):
     cultivated_percentage: float
     decision: str
     confidence_score: float
+    dominant_class: str
+    land_classes: dict
+    polygon_coords: list
 
 SQ_M_PER_ACRE = 4046.8564224
 
@@ -97,7 +100,9 @@ MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
 @app.post("/validate_plot", response_model=ValidationResponse)
 async def validate_plot(
     file: UploadFile = File(..., description="KML file to validate"),
-    year: int = Query(2024, ge=2015, le=2025, description="Year for satellite imagery"),
+    year: int = Query(2024, ge=2015, le=2026, description="Year for satellite imagery"),
+    start_month: int = Query(1, ge=1, le=12, description="Start month (1-12)"),
+    end_month: int = Query(12, ge=1, le=12, description="End month (1-12)"),
     cloud_threshold: int = Query(20, ge=1, le=100, description="Max cloud cover %"),
 ):
     """
@@ -148,8 +153,8 @@ async def validate_plot(
 
     # ── 5. Run Earth Engine processing pipeline ──
     try:
-        logger.info("Starting EE processing (year=%d, cloud<%d%%)", year, cloud_threshold)
-        area_stats = compute_cultivated_stats(ee_region, year, cloud_threshold)
+        logger.info("Starting EE processing (year=%d, months=%d-%d, cloud<%d%%)", year, start_month, end_month, cloud_threshold)
+        area_stats = compute_cultivated_stats(ee_region, year, start_month, end_month, cloud_threshold)
         logger.info("EE stats: %s", area_stats)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -168,6 +173,20 @@ async def validate_plot(
     result["plot_area_acres"] = round(result.pop("plot_area_sq_m") / SQ_M_PER_ACRE, 4)
     result["cropland_area_acres"] = round(result.pop("cropland_area_sq_m") / SQ_M_PER_ACRE, 4)
     result["active_vegetation_area_acres"] = round(result.pop("active_vegetation_area_sq_m") / SQ_M_PER_ACRE, 4)
+
+    # Convert land class areas to acres and find dominant class
+    raw_classes = area_stats.get("land_classes_sq_m", {})
+    land_classes_acres = {
+        name: round(area / SQ_M_PER_ACRE, 4)
+        for name, area in raw_classes.items()
+    }
+    result["land_classes"] = land_classes_acres
+    result["dominant_class"] = max(raw_classes, key=raw_classes.get) if raw_classes else "Unknown"
+
+    # Add polygon coords for map preview [lat, lon] pairs
+    result["polygon_coords"] = [
+        [c[1], c[0]] for c in polygon.exterior.coords
+    ]
 
     logger.info("Validation result: %s", result)
     return result

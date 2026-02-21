@@ -8,6 +8,11 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
       * {
         margin: 0;
@@ -113,7 +118,8 @@
         text-transform: uppercase;
         letter-spacing: 0.05em;
       }
-      .option-group input {
+      .option-group input,
+      .option-group select {
         background: #0d1225;
         border: 1px solid rgba(99, 179, 237, 0.2);
         border-radius: 8px;
@@ -123,7 +129,8 @@
         font-size: 0.9rem;
         width: 120px;
       }
-      .option-group input:focus {
+      .option-group input:focus,
+      .option-group select:focus {
         outline: none;
         border-color: #63b3ed;
       }
@@ -347,6 +354,80 @@
         font-weight: 600;
       }
 
+      /* ── Land Classes ── */
+      .land-classes {
+        margin-top: 1.5rem;
+        background: linear-gradient(145deg, #141a2e, #1a2040);
+        border: 1px solid rgba(99, 179, 237, 0.08);
+        border-radius: 12px;
+        padding: 1.2rem;
+      }
+      .land-classes .section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 1rem;
+      }
+      .land-classes .label {
+        font-size: 0.72rem;
+        color: #718096;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .dominant-badge {
+        padding: 0.25rem 0.8rem;
+        border-radius: 16px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        background: rgba(99, 179, 237, 0.12);
+        color: #63b3ed;
+        border: 1px solid rgba(99, 179, 237, 0.25);
+      }
+      .class-row {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        margin-bottom: 0.5rem;
+      }
+      .class-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 3px;
+        flex-shrink: 0;
+      }
+      .class-name {
+        font-size: 0.78rem;
+        color: #a0aec0;
+        width: 140px;
+        flex-shrink: 0;
+      }
+      .class-bar-bg {
+        flex: 1;
+        background: #0d1225;
+        border-radius: 4px;
+        height: 8px;
+        overflow: hidden;
+      }
+      .class-bar {
+        height: 100%;
+        border-radius: 4px;
+        transition: width 0.8s ease;
+      }
+      .class-pct {
+        font-size: 0.75rem;
+        color: #718096;
+        width: 50px;
+        text-align: right;
+        flex-shrink: 0;
+      }
+      .class-acres {
+        font-size: 0.68rem;
+        color: #4a5568;
+        width: 65px;
+        text-align: right;
+        flex-shrink: 0;
+      }
+
       /* ── Error ── */
       .error-box {
         margin-top: 2rem;
@@ -537,11 +618,45 @@
               id="yearInput"
               value="2024"
               min="2015"
-              max="2025"
+              max="2026"
             />
           </div>
           <div class="option-group">
-            <label>Cloud Threshold %</label>
+            <label>From</label>
+            <select id="startMonth">
+              <option value="1" selected>Jan</option>
+              <option value="2">Feb</option>
+              <option value="3">Mar</option>
+              <option value="4">Apr</option>
+              <option value="5">May</option>
+              <option value="6">Jun</option>
+              <option value="7">Jul</option>
+              <option value="8">Aug</option>
+              <option value="9">Sep</option>
+              <option value="10">Oct</option>
+              <option value="11">Nov</option>
+              <option value="12">Dec</option>
+            </select>
+          </div>
+          <div class="option-group">
+            <label>To</label>
+            <select id="endMonth">
+              <option value="1">Jan</option>
+              <option value="2">Feb</option>
+              <option value="3">Mar</option>
+              <option value="4">Apr</option>
+              <option value="5">May</option>
+              <option value="6">Jun</option>
+              <option value="7">Jul</option>
+              <option value="8">Aug</option>
+              <option value="9">Sep</option>
+              <option value="10">Oct</option>
+              <option value="11">Nov</option>
+              <option value="12" selected>Dec</option>
+            </select>
+          </div>
+          <div class="option-group">
+            <label>Cloud %</label>
             <input type="number" id="cloudInput" value="20" min="1" max="100" />
           </div>
         </div>
@@ -570,6 +685,31 @@
       <div class="error-box" id="errorBox">
         <strong>⚠ Validation Error</strong>
         <span id="errorMsg"></span>
+      </div>
+
+      <!-- Map Preview -->
+      <div id="mapSection" style="margin-top: 2rem; display: none">
+        <div
+          style="
+            background: linear-gradient(145deg, #141a2e, #1a2040);
+            border: 1px solid rgba(99, 179, 237, 0.08);
+            border-radius: 12px;
+            padding: 1.2rem;
+          "
+        >
+          <div
+            style="
+              font-size: 0.72rem;
+              color: #718096;
+              text-transform: uppercase;
+              letter-spacing: 0.06em;
+              margin-bottom: 0.8rem;
+            "
+          >
+            Plot Location
+          </div>
+          <div id="map" style="height: 350px; border-radius: 8px"></div>
+        </div>
       </div>
 
       <!-- Results -->
@@ -619,6 +759,15 @@
             <div class="conf-bar" id="confBar" style="width: 0%"></div>
           </div>
           <div class="conf-value" id="confValue">—</div>
+        </div>
+
+        <!-- Land Class Breakdown -->
+        <div class="land-classes" id="landClasses" style="display: none">
+          <div class="section-header">
+            <div class="label">ESA WorldCover — Land Classification</div>
+            <span class="dominant-badge" id="dominantBadge">—</span>
+          </div>
+          <div id="classRows"></div>
         </div>
       </div>
 
@@ -734,6 +883,7 @@
       const errorBox = document.getElementById("errorBox");
       const explanation = document.getElementById("explanation");
       let selectedFile = null;
+      let mapInstance = null;
 
       // — Drag & drop —
       dropZone.addEventListener("click", () => fileInput.click());
@@ -792,11 +942,13 @@
         const formData = new FormData();
         formData.append("file", selectedFile);
         const year = document.getElementById("yearInput").value;
+        const sm = document.getElementById("startMonth").value;
+        const em = document.getElementById("endMonth").value;
         const cloud = document.getElementById("cloudInput").value;
 
         try {
           const res = await fetch(
-            `/validate_plot?year=${year}&cloud_threshold=${cloud}`,
+            `/validate_plot?year=${year}&start_month=${sm}&end_month=${em}&cloud_threshold=${cloud}`,
             {
               method: "POST",
               body: formData,
@@ -856,6 +1008,75 @@
           "conf-bar " + (pct >= 65 ? "high" : pct >= 35 ? "medium" : "low");
         document.getElementById("confValue").textContent =
           (data.confidence_score * 100).toFixed(1) + "%";
+
+        // Land class breakdown
+        const CLASS_COLORS = {
+          Trees: "#2d6a4f",
+          Shrubland: "#95d5b2",
+          Grassland: "#d4e09b",
+          Cropland: "#f4a261",
+          "Built-up": "#e76f51",
+          "Bare / Sparse Vegetation": "#c9b99a",
+          "Permanent Water": "#457b9d",
+          "Herbaceous Wetland": "#a8dadc",
+          Mangroves: "#1d3557",
+          "Moss and Lichen": "#b5e48c",
+        };
+
+        if (data.land_classes && Object.keys(data.land_classes).length > 0) {
+          document.getElementById("landClasses").style.display = "block";
+          document.getElementById("dominantBadge").textContent =
+            "🏷️ Dominant: " + data.dominant_class;
+
+          const totalAcres = data.plot_area_acres;
+          const container = document.getElementById("classRows");
+          container.innerHTML = "";
+
+          // Sort classes by area descending
+          const sorted = Object.entries(data.land_classes).sort(
+            (a, b) => b[1] - a[1],
+          );
+
+          for (const [name, acres] of sorted) {
+            const classPct = totalAcres > 0 ? (acres / totalAcres) * 100 : 0;
+            const color = CLASS_COLORS[name] || "#718096";
+            container.innerHTML += `
+              <div class="class-row">
+                <span class="class-dot" style="background:${color}"></span>
+                <span class="class-name">${name}</span>
+                <div class="class-bar-bg">
+                  <div class="class-bar" style="width:${classPct}%;background:${color}"></div>
+                </div>
+                <span class="class-pct">${classPct.toFixed(1)}%</span>
+                <span class="class-acres">${acres.toFixed(2)} ac</span>
+              </div>`;
+          }
+        } else {
+          document.getElementById("landClasses").style.display = "none";
+        }
+
+        // Map preview
+        if (data.polygon_coords && data.polygon_coords.length > 0) {
+          document.getElementById("mapSection").style.display = "block";
+          if (mapInstance) {
+            mapInstance.remove();
+          }
+          mapInstance = L.map("map");
+          L.tileLayer(
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            {
+              attribution: "&copy; Esri",
+              maxZoom: 19,
+            },
+          ).addTo(mapInstance);
+          const poly = L.polygon(data.polygon_coords, {
+            color: "#63b3ed",
+            weight: 3,
+            fillColor: "#63b3ed",
+            fillOpacity: 0.15,
+          }).addTo(mapInstance);
+          mapInstance.fitBounds(poly.getBounds().pad(0.3));
+        }
       }
     </script>
   </body>
