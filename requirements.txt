@@ -1,0 +1,7 @@
+opencv-python
+numpy
+matplotlib
+geopandas
+fiona
+requests
+python-dotenv
