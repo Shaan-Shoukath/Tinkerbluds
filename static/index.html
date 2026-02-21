@@ -1,0 +1,862 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cultivated Land Validator</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family: "Inter", sans-serif;
+        background: #0a0e1a;
+        color: #e0e6f0;
+        min-height: 100vh;
+      }
+
+      /* ── Header ── */
+      .header {
+        background: linear-gradient(135deg, #0f1629 0%, #1a1f3a 100%);
+        border-bottom: 1px solid rgba(99, 179, 237, 0.15);
+        padding: 1.2rem 2rem;
+        display: flex;
+        align-items: center;
+        gap: 0.8rem;
+      }
+      .header svg {
+        width: 28px;
+        height: 28px;
+        fill: #63b3ed;
+      }
+      .header h1 {
+        font-size: 1.25rem;
+        font-weight: 600;
+        background: linear-gradient(135deg, #63b3ed, #68d391);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+
+      .container {
+        max-width: 960px;
+        margin: 2rem auto;
+        padding: 0 1.5rem;
+      }
+
+      /* ── Upload Card ── */
+      .upload-card {
+        background: linear-gradient(145deg, #141a2e, #1a2040);
+        border: 1px solid rgba(99, 179, 237, 0.12);
+        border-radius: 16px;
+        padding: 2.5rem;
+        text-align: center;
+        transition: border-color 0.3s;
+      }
+      .upload-card:hover {
+        border-color: rgba(99, 179, 237, 0.3);
+      }
+      .upload-zone {
+        border: 2px dashed rgba(99, 179, 237, 0.25);
+        border-radius: 12px;
+        padding: 3rem 2rem;
+        cursor: pointer;
+        transition: all 0.3s;
+        position: relative;
+      }
+      .upload-zone:hover,
+      .upload-zone.dragover {
+        border-color: #63b3ed;
+        background: rgba(99, 179, 237, 0.05);
+      }
+      .upload-zone svg {
+        width: 48px;
+        height: 48px;
+        fill: #4a5568;
+        margin-bottom: 1rem;
+      }
+      .upload-zone p {
+        color: #718096;
+        font-size: 0.95rem;
+      }
+      .upload-zone .filename {
+        color: #68d391;
+        font-weight: 500;
+        margin-top: 0.5rem;
+      }
+      .upload-zone input {
+        display: none;
+      }
+
+      .options-row {
+        display: flex;
+        gap: 1rem;
+        margin-top: 1.5rem;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+      .option-group {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.3rem;
+      }
+      .option-group label {
+        font-size: 0.75rem;
+        color: #718096;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .option-group input {
+        background: #0d1225;
+        border: 1px solid rgba(99, 179, 237, 0.2);
+        border-radius: 8px;
+        padding: 0.5rem 0.8rem;
+        color: #e0e6f0;
+        font-family: inherit;
+        font-size: 0.9rem;
+        width: 120px;
+      }
+      .option-group input:focus {
+        outline: none;
+        border-color: #63b3ed;
+      }
+
+      .submit-btn {
+        margin-top: 1.5rem;
+        padding: 0.75rem 2.5rem;
+        background: linear-gradient(135deg, #2b6cb0, #3182ce);
+        color: white;
+        border: none;
+        border-radius: 10px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s;
+        font-family: inherit;
+      }
+      .submit-btn:hover:not(:disabled) {
+        background: linear-gradient(135deg, #3182ce, #4299e1);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 20px rgba(49, 130, 206, 0.4);
+      }
+      .submit-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      /* ── Processing ── */
+      .processing {
+        margin-top: 2rem;
+        display: none;
+      }
+      .processing.active {
+        display: block;
+      }
+      .progress-bar-bg {
+        background: #1a2040;
+        border-radius: 8px;
+        height: 6px;
+        overflow: hidden;
+        margin-top: 1rem;
+      }
+      .progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, #63b3ed, #68d391);
+        border-radius: 8px;
+        width: 0%;
+        animation: indeterminate 1.8s ease-in-out infinite;
+      }
+      @keyframes indeterminate {
+        0% {
+          width: 0%;
+          margin-left: 0;
+        }
+        50% {
+          width: 60%;
+          margin-left: 20%;
+        }
+        100% {
+          width: 0%;
+          margin-left: 100%;
+        }
+      }
+      .step-list {
+        text-align: left;
+        margin-top: 1.2rem;
+        list-style: none;
+      }
+      .step-list li {
+        padding: 0.4rem 0;
+        font-size: 0.85rem;
+        color: #4a5568;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        transition: color 0.3s;
+      }
+      .step-list li.active {
+        color: #63b3ed;
+      }
+      .step-list li.done {
+        color: #68d391;
+      }
+      .step-list li .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #2d3748;
+        flex-shrink: 0;
+      }
+      .step-list li.active .dot {
+        background: #63b3ed;
+        box-shadow: 0 0 8px rgba(99, 179, 237, 0.6);
+        animation: pulse 1.2s infinite;
+      }
+      .step-list li.done .dot {
+        background: #68d391;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          transform: scale(1);
+        }
+        50% {
+          transform: scale(1.4);
+        }
+      }
+
+      /* ── Results ── */
+      .results {
+        margin-top: 2rem;
+        display: none;
+      }
+      .results.active {
+        display: block;
+      }
+      .result-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 1.5rem;
+      }
+      .result-header h2 {
+        font-size: 1.2rem;
+        font-weight: 600;
+      }
+
+      .badge {
+        padding: 0.4rem 1.2rem;
+        border-radius: 20px;
+        font-weight: 700;
+        font-size: 0.85rem;
+        letter-spacing: 0.08em;
+      }
+      .badge.pass {
+        background: rgba(72, 187, 120, 0.15);
+        color: #68d391;
+        border: 1px solid rgba(72, 187, 120, 0.3);
+      }
+      .badge.review {
+        background: rgba(237, 137, 54, 0.15);
+        color: #ed8936;
+        border: 1px solid rgba(237, 137, 54, 0.3);
+      }
+
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+      }
+      .stat-card {
+        background: linear-gradient(145deg, #141a2e, #1a2040);
+        border: 1px solid rgba(99, 179, 237, 0.08);
+        border-radius: 12px;
+        padding: 1.2rem;
+      }
+      .stat-card .label {
+        font-size: 0.72rem;
+        color: #718096;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin-bottom: 0.2rem;
+      }
+      .stat-card .desc {
+        font-size: 0.7rem;
+        color: #4a5568;
+        margin-bottom: 0.5rem;
+        line-height: 1.3;
+      }
+      .stat-card .value {
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: #e2e8f0;
+      }
+      .stat-card .unit {
+        font-size: 0.8rem;
+        color: #718096;
+        font-weight: 400;
+      }
+
+      /* Confidence bar */
+      .confidence-track {
+        margin-top: 1.5rem;
+        background: #141a2e;
+        border: 1px solid rgba(99, 179, 237, 0.08);
+        border-radius: 12px;
+        padding: 1.2rem;
+      }
+      .confidence-track .label {
+        font-size: 0.72rem;
+        color: #718096;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin-bottom: 0.8rem;
+      }
+      .conf-bar-bg {
+        background: #0d1225;
+        border-radius: 8px;
+        height: 12px;
+        overflow: hidden;
+        position: relative;
+      }
+      .conf-bar {
+        height: 100%;
+        border-radius: 8px;
+        transition: width 1s ease;
+      }
+      .conf-bar.high {
+        background: linear-gradient(90deg, #48bb78, #68d391);
+      }
+      .conf-bar.medium {
+        background: linear-gradient(90deg, #ed8936, #f6ad55);
+      }
+      .conf-bar.low {
+        background: linear-gradient(90deg, #e53e3e, #fc8181);
+      }
+      .conf-value {
+        text-align: right;
+        margin-top: 0.3rem;
+        font-size: 0.85rem;
+        font-weight: 600;
+      }
+
+      /* ── Error ── */
+      .error-box {
+        margin-top: 2rem;
+        background: rgba(229, 62, 62, 0.1);
+        border: 1px solid rgba(229, 62, 62, 0.3);
+        border-radius: 12px;
+        padding: 1.2rem;
+        color: #fc8181;
+        display: none;
+      }
+      .error-box.active {
+        display: block;
+      }
+      .error-box strong {
+        display: block;
+        margin-bottom: 0.3rem;
+      }
+
+      /* ── How It Works ── */
+      .explanation {
+        margin-top: 2.5rem;
+        background: linear-gradient(145deg, #141a2e, #1a2040);
+        border: 1px solid rgba(99, 179, 237, 0.08);
+        border-radius: 16px;
+        padding: 2rem;
+        display: none;
+      }
+      .explanation.active {
+        display: block;
+      }
+      .explanation h2 {
+        font-size: 1.1rem;
+        font-weight: 600;
+        margin-bottom: 1.5rem;
+        color: #63b3ed;
+      }
+
+      .pipeline {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+      }
+
+      .pipe-step {
+        display: flex;
+        gap: 1rem;
+        position: relative;
+        padding-bottom: 1.5rem;
+      }
+      .pipe-step:last-child {
+        padding-bottom: 0;
+      }
+
+      /* Vertical connector line */
+      .pipe-step::before {
+        content: "";
+        position: absolute;
+        left: 17px;
+        top: 36px;
+        width: 2px;
+        height: calc(100% - 36px);
+        background: linear-gradient(
+          180deg,
+          rgba(99, 179, 237, 0.3),
+          rgba(99, 179, 237, 0.05)
+        );
+      }
+      .pipe-step:last-child::before {
+        display: none;
+      }
+
+      .pipe-icon {
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.1rem;
+        flex-shrink: 0;
+      }
+      .pipe-icon.blue {
+        background: rgba(99, 179, 237, 0.15);
+      }
+      .pipe-icon.green {
+        background: rgba(72, 187, 120, 0.15);
+      }
+      .pipe-icon.orange {
+        background: rgba(237, 137, 54, 0.15);
+      }
+      .pipe-icon.purple {
+        background: rgba(159, 122, 234, 0.15);
+      }
+
+      .pipe-content {
+        flex: 1;
+      }
+      .pipe-content h3 {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: #e2e8f0;
+        margin-bottom: 0.3rem;
+      }
+      .pipe-content p {
+        font-size: 0.78rem;
+        color: #718096;
+        line-height: 1.5;
+      }
+      .pipe-content .tag {
+        display: inline-block;
+        margin-top: 0.4rem;
+        padding: 0.15rem 0.5rem;
+        border-radius: 6px;
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .tag.sentinel {
+        background: rgba(99, 179, 237, 0.12);
+        color: #63b3ed;
+      }
+      .tag.esa {
+        background: rgba(72, 187, 120, 0.12);
+        color: #68d391;
+      }
+      .tag.formula {
+        background: rgba(237, 137, 54, 0.12);
+        color: #ed8936;
+      }
+
+      .decision-explain {
+        margin-top: 1.5rem;
+        padding-top: 1rem;
+        border-top: 1px solid rgba(99, 179, 237, 0.08);
+      }
+      .decision-explain h3 {
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: #e2e8f0;
+        margin-bottom: 0.5rem;
+      }
+      .decision-explain p {
+        font-size: 0.78rem;
+        color: #718096;
+        line-height: 1.5;
+      }
+      .formula-box {
+        background: #0d1225;
+        border-radius: 8px;
+        padding: 0.7rem 1rem;
+        margin: 0.5rem 0;
+        font-family: "Courier New", monospace;
+        font-size: 0.78rem;
+        color: #ed8936;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <svg viewBox="0 0 24 24">
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+      </svg>
+      <h1>Cultivated Land Validator</h1>
+    </div>
+
+    <div class="container">
+      <!-- Upload Card -->
+      <div class="upload-card">
+        <div class="upload-zone" id="dropZone">
+          <svg viewBox="0 0 24 24">
+            <path
+              d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+            />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="12" y1="18" x2="12" y2="12" />
+            <polyline points="9 15 12 12 15 15" />
+          </svg>
+          <p>Drop your <strong>.kml</strong> file here or click to browse</p>
+          <p class="filename" id="fileName"></p>
+          <input type="file" id="fileInput" accept=".kml" />
+        </div>
+        <div class="options-row">
+          <div class="option-group">
+            <label>Year</label>
+            <input
+              type="number"
+              id="yearInput"
+              value="2024"
+              min="2015"
+              max="2025"
+            />
+          </div>
+          <div class="option-group">
+            <label>Cloud Threshold %</label>
+            <input type="number" id="cloudInput" value="20" min="1" max="100" />
+          </div>
+        </div>
+        <button class="submit-btn" id="submitBtn" disabled>
+          Validate Plot
+        </button>
+      </div>
+
+      <!-- Processing -->
+      <div class="processing" id="processing">
+        <div class="progress-bar-bg"><div class="progress-bar"></div></div>
+        <ul class="step-list" id="stepList">
+          <li><span class="dot"></span> Parsing KML geometry</li>
+          <li><span class="dot"></span> Validating polygon boundaries</li>
+          <li>
+            <span class="dot"></span> Fetching Sentinel-2 imagery from Earth
+            Engine
+          </li>
+          <li><span class="dot"></span> Computing NDVI vegetation index</li>
+          <li><span class="dot"></span> Analysing ESA WorldCover cropland</li>
+          <li><span class="dot"></span> Calculating area statistics</li>
+        </ul>
+      </div>
+
+      <!-- Error -->
+      <div class="error-box" id="errorBox">
+        <strong>⚠ Validation Error</strong>
+        <span id="errorMsg"></span>
+      </div>
+
+      <!-- Results -->
+      <div class="results" id="results">
+        <div class="result-header">
+          <h2>Validation Results</h2>
+          <span class="badge" id="decisionBadge">—</span>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="label">Total Plot Area</div>
+            <div class="desc">
+              Total area of the uploaded KML polygon boundary
+            </div>
+            <div class="value" id="plotArea">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">ESA Cropland</div>
+            <div class="desc">
+              Area classified as farmland by ESA WorldCover satellite ML model
+              (class 40)
+            </div>
+            <div class="value" id="cropArea">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">Active Vegetation (NDVI)</div>
+            <div class="desc">
+              Land with healthy green growth detected via Sentinel-2
+              near-infrared (NDVI &gt; 0.3)
+            </div>
+            <div class="value" id="vegArea">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">Cultivated Land</div>
+            <div class="desc">
+              Overlap of ESA Cropland + Active Vegetation = confirmed active
+              farming
+            </div>
+            <div class="value" id="cultPct">—</div>
+          </div>
+        </div>
+
+        <div class="confidence-track">
+          <div class="label">Confidence Score</div>
+          <div class="conf-bar-bg">
+            <div class="conf-bar" id="confBar" style="width: 0%"></div>
+          </div>
+          <div class="conf-value" id="confValue">—</div>
+        </div>
+      </div>
+
+      <!-- How It Works (shown after results) -->
+      <div class="explanation" id="explanation">
+        <h2>🔬 How This Classification Works</h2>
+
+        <div class="pipeline">
+          <div class="pipe-step">
+            <div class="pipe-icon blue">📍</div>
+            <div class="pipe-content">
+              <h3>1. KML Polygon Parsing</h3>
+              <p>
+                Your KML file contains GPS coordinates defining the plot
+                boundary. We extract the polygon and compute its geographic
+                area.
+              </p>
+            </div>
+          </div>
+
+          <div class="pipe-step">
+            <div class="pipe-icon blue">🛰️</div>
+            <div class="pipe-content">
+              <h3>2. Sentinel-2 Satellite Imagery</h3>
+              <p>
+                ESA's Sentinel-2 satellite photographs the entire Earth every ~5
+                days at 10m resolution. We collect all cloud-free images from
+                the selected year and compute a
+                <strong>median composite</strong> — this removes temporary
+                artifacts like clouds and shadows.
+              </p>
+              <span class="tag sentinel">Sentinel-2 L2A · 10m resolution</span>
+            </div>
+          </div>
+
+          <div class="pipe-step">
+            <div class="pipe-icon green">🌿</div>
+            <div class="pipe-content">
+              <h3>3. NDVI — Vegetation Health Index</h3>
+              <p>
+                Healthy plants absorb red light for photosynthesis and reflect
+                near-infrared (NIR) strongly. NDVI measures this contrast:
+                values above 0.5 indicate active, healthy vegetation (crops,
+                dense greenery). Values near 0 indicate bare soil, buildings, or
+                roads.
+              </p>
+              <div class="formula-box">NDVI = (NIR − Red) / (NIR + Red)</div>
+              <span class="tag formula">Band 8 (NIR) vs Band 4 (Red)</span>
+            </div>
+          </div>
+
+          <div class="pipe-step">
+            <div class="pipe-icon purple">🗺️</div>
+            <div class="pipe-content">
+              <h3>4. ESA WorldCover — Land Use Map</h3>
+              <p>
+                This is a global 10m land use classification map built by ESA
+                using machine learning on satellite data. Each pixel is labelled
+                as one of: <strong>Trees (10)</strong>, Shrubland (20),
+                Grassland (30), <strong>Cropland (40)</strong>, Built-up (50),
+                Bare (60), or Water (80). We check if ESA's model classifies
+                each pixel inside your plot as
+                <strong>Cropland (class 40)</strong>.
+              </p>
+              <span class="tag esa">ESA WorldCover 2021 · ML-classified</span>
+            </div>
+          </div>
+
+          <div class="pipe-step">
+            <div class="pipe-icon orange">✅</div>
+            <div class="pipe-content">
+              <h3>5. Intersection = Cultivated Land</h3>
+              <p>
+                We combine both signals: a pixel is
+                <strong>cultivated</strong> only if ESA says "this is farmland"
+                <em>AND</em> NDVI confirms "something is actively growing." This
+                two-factor check prevents false positives (e.g. fallow farmland
+                or green forests).
+              </p>
+              <div class="formula-box">
+                Cultivated = WorldCover == Cropland AND NDVI &gt; 0.3
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="decision-explain">
+          <h3>📊 Decision Logic</h3>
+          <p>
+            The cultivated percentage is the ratio of cultivated area to total
+            plot area. The confidence score blends this with mean NDVI health:
+          </p>
+          <div class="formula-box">
+            Confidence = 0.7 × cultivated% + 0.3 × mean NDVI
+          </div>
+          <p style="margin-top: 0.5rem">
+            <strong style="color: #68d391">PASS</strong> — Cultivated percentage
+            &gt; 60% (confirmed farming activity)<br />
+            <strong style="color: #ed8936">REVIEW</strong> — Below threshold;
+            may be forest, fallow land, or non-agricultural use
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const dropZone = document.getElementById("dropZone");
+      const fileInput = document.getElementById("fileInput");
+      const fileName = document.getElementById("fileName");
+      const submitBtn = document.getElementById("submitBtn");
+      const processing = document.getElementById("processing");
+      const results = document.getElementById("results");
+      const errorBox = document.getElementById("errorBox");
+      const explanation = document.getElementById("explanation");
+      let selectedFile = null;
+
+      // — Drag & drop —
+      dropZone.addEventListener("click", () => fileInput.click());
+      dropZone.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        dropZone.classList.add("dragover");
+      });
+      dropZone.addEventListener("dragleave", () =>
+        dropZone.classList.remove("dragover"),
+      );
+      dropZone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        dropZone.classList.remove("dragover");
+        if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]);
+      });
+      fileInput.addEventListener("change", () => {
+        if (fileInput.files.length) setFile(fileInput.files[0]);
+      });
+
+      function setFile(file) {
+        if (!file.name.toLowerCase().endsWith(".kml")) {
+          alert("Please select a .kml file");
+          return;
+        }
+        selectedFile = file;
+        fileName.textContent = file.name;
+        submitBtn.disabled = false;
+      }
+
+      function animateSteps() {
+        const steps = document.querySelectorAll("#stepList li");
+        let i = 0;
+        const interval = setInterval(() => {
+          if (i > 0) steps[i - 1].classList.replace("active", "done");
+          if (i < steps.length) {
+            steps[i].classList.add("active");
+            i++;
+          } else clearInterval(interval);
+        }, 2500);
+        return interval;
+      }
+
+      // — Submit —
+      submitBtn.addEventListener("click", async () => {
+        if (!selectedFile) return;
+        results.classList.remove("active");
+        errorBox.classList.remove("active");
+        explanation.classList.remove("active");
+        processing.classList.add("active");
+        submitBtn.disabled = true;
+        document
+          .querySelectorAll("#stepList li")
+          .forEach((li) => (li.className = ""));
+
+        const stepInterval = animateSteps();
+        const formData = new FormData();
+        formData.append("file", selectedFile);
+        const year = document.getElementById("yearInput").value;
+        const cloud = document.getElementById("cloudInput").value;
+
+        try {
+          const res = await fetch(
+            `/validate_plot?year=${year}&cloud_threshold=${cloud}`,
+            {
+              method: "POST",
+              body: formData,
+            },
+          );
+          clearInterval(stepInterval);
+          document.querySelectorAll("#stepList li").forEach((li) => {
+            li.classList.remove("active");
+            li.classList.add("done");
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.detail || "Unknown error");
+          setTimeout(() => {
+            processing.classList.remove("active");
+            showResults(data);
+          }, 600);
+        } catch (err) {
+          clearInterval(stepInterval);
+          processing.classList.remove("active");
+          errorBox.classList.add("active");
+          document.getElementById("errorMsg").textContent = err.message;
+        }
+        submitBtn.disabled = false;
+      });
+
+      function formatAcres(acres) {
+        return acres.toFixed(2) + ' <span class="unit">acres</span>';
+      }
+
+      function showResults(data) {
+        results.classList.add("active");
+        explanation.classList.add("active");
+
+        document.getElementById("plotArea").innerHTML = formatAcres(
+          data.plot_area_acres,
+        );
+        document.getElementById("cropArea").innerHTML = formatAcres(
+          data.cropland_area_acres,
+        );
+        document.getElementById("vegArea").innerHTML = formatAcres(
+          data.active_vegetation_area_acres,
+        );
+        document.getElementById("cultPct").innerHTML =
+          data.cultivated_percentage.toFixed(1) +
+          '<span class="unit"> %</span>';
+
+        // Decision badge
+        const badge = document.getElementById("decisionBadge");
+        badge.textContent = data.decision;
+        badge.className = "badge " + data.decision.toLowerCase();
+
+        // Confidence bar
+        const pct = Math.min(100, data.confidence_score * 100);
+        const bar = document.getElementById("confBar");
+        bar.style.width = pct + "%";
+        bar.className =
+          "conf-bar " + (pct >= 65 ? "high" : pct >= 35 ? "medium" : "low");
+        document.getElementById("confValue").textContent =
+          (data.confidence_score * 100).toFixed(1) + "%";
+      }
+    </script>
+  </body>
+</html>

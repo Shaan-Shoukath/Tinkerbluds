@@ -5,3 +5,9 @@ geopandas
 fiona
 requests
 python-dotenv
+Pillow
+fastapi
+uvicorn[standard]
+earthengine-api
+pydantic
+python-multipart

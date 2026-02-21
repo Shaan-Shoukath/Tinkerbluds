@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+<Document>
+	<name>Palakkad Paddy Test</name>
+	<Placemark>
+		<name>Chittur Paddy Field</name>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						76.74,10.70,0 76.745,10.70,0 76.745,10.703,0 76.74,10.703,0 76.74,10.70,0
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+</Document>
+</kml>
