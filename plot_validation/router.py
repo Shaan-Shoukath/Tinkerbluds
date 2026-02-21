@@ -14,7 +14,7 @@ from plot_validation.earth_engine_service import (
     compute_cultivated_stats, generate_thumbnails,
 )
 from plot_validation.validation_logic import PlotValidatorStage1
-from plot_validation.yield_service import estimate_yield, integrate_yield_score
+from plot_validation.yield_service import estimate_yield, integrate_yield_score, recommend_crops
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +24,9 @@ router = APIRouter(tags=["Plot Validation"])
 @router.post("/validate_plot", response_model=ValidationResponse)
 async def validate_plot(
     file: UploadFile = File(..., description="KML file to validate"),
-    year: int = Query(2024, ge=2015, le=2026, description="Year for satellite imagery"),
+    start_year: int = Query(2025, ge=2015, le=2026, description="Start year for satellite imagery"),
     start_month: int = Query(1, ge=1, le=12, description="Start month (1-12)"),
+    end_year: int = Query(2025, ge=2015, le=2026, description="End year for satellite imagery"),
     end_month: int = Query(12, ge=1, le=12, description="End month (1-12)"),
     cloud_threshold: int = Query(20, ge=1, le=100, description="Max cloud cover %"),
     claimed_crop: str = Query("", description="Crop claimed by farmer (e.g. rice, wheat)"),
@@ -79,11 +80,11 @@ async def validate_plot(
     # ── 5. Run Earth Engine processing pipeline ──
     try:
         logger.info(
-            "Starting EE processing (year=%d, months=%d-%d, cloud<%d%%)",
-            year, start_month, end_month, cloud_threshold,
+            "Starting EE processing (%d-%02d to %d-%02d, cloud<%d%%)",
+            start_year, start_month, end_year, end_month, cloud_threshold,
         )
         area_stats = compute_cultivated_stats(
-            ee_region, year, start_month, end_month, cloud_threshold,
+            ee_region, start_year, start_month, end_year, end_month, cloud_threshold,
         )
         logger.info("EE stats: %s", area_stats)
     except ValueError as e:
@@ -126,8 +127,9 @@ async def validate_plot(
     try:
         thumbs = generate_thumbnails(
             ee_region,
-            year=year,
+            start_year=start_year,
             start_month=start_month,
+            end_year=end_year,
             end_month=end_month,
             cloud_threshold=cloud_threshold,
         )
@@ -172,6 +174,20 @@ async def validate_plot(
             logger.info("Yield estimate: %s", yield_result["yield_confidence"])
         except Exception as e:
             logger.warning("Yield estimation failed (non-fatal): %s", e)
+
+    # ── 9. Crop Recommendations (always, independent of claimed_crop) ──
+    try:
+        centroid = polygon.centroid
+        mean_ndvi = area_stats.get("mean_ndvi", 0.0)
+        result["recommended_crops"] = recommend_crops(
+            lat=centroid.y,
+            lon=centroid.x,
+            mean_ndvi=mean_ndvi,
+            top_n=5,
+        )
+    except Exception as e:
+        logger.warning("Crop recommendation failed (non-fatal): %s", e)
+        result["recommended_crops"] = []
 
     logger.info("Validation result: decision=%s", result["decision"])
     return result

@@ -27,3 +27,5 @@ class ValidationResponse(BaseModel):
     weather_actual: dict = {}
     crop_ideal: dict = {}
     parameter_scores: dict = {}
+    # Crop recommendations
+    recommended_crops: list = []

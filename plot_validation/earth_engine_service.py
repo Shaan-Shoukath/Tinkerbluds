@@ -45,22 +45,24 @@ def init_ee() -> None:
 
 def get_sentinel2_composite(
     region: ee.Geometry,
-    year: int = 2024,
+    start_year: int = 2024,
     start_month: int = 1,
+    end_year: int = 2024,
     end_month: int = 12,
     cloud_threshold: int = 20,
 ) -> ee.Image:
     """
     Build a cloud-filtered median composite from Sentinel-2 Surface Reflectance.
 
+    Supports cross-year ranges (e.g. Nov 2025 → Feb 2026).
     Bands selected: B2 (Blue), B3 (Green), B4 (Red), B8 (NIR)
     """
-    start_date = f"{year}-{start_month:02d}-01"
+    start_date = f"{start_year}-{start_month:02d}-01"
     # End on the last day of end_month
     if end_month == 12:
-        end_date = f"{year}-12-31"
+        end_date = f"{end_year}-12-31"
     else:
-        end_date = f"{year}-{end_month + 1:02d}-01"
+        end_date = f"{end_year}-{end_month + 1:02d}-01"
 
     collection = (
         ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
@@ -74,12 +76,12 @@ def get_sentinel2_composite(
     count = collection.size().getInfo()
     if count == 0:
         raise ValueError(
-            f"No Sentinel-2 images found for the region in {year} "
-            f"with cloud threshold < {cloud_threshold}%. "
-            "Try increasing the cloud threshold or changing the year."
+            f"No Sentinel-2 images found for {start_year}-{start_month:02d} to "
+            f"{end_year}-{end_month:02d} with cloud threshold < {cloud_threshold}%. "
+            "Try increasing the cloud threshold or changing the date range."
         )
 
-    logger.info("Found %d Sentinel-2 images for %d", count, year)
+    logger.info("Found %d Sentinel-2 images for %d-%02d to %d-%02d", count, start_year, start_month, end_year, end_month)
 
     # Median composite reduces cloud/shadow artefacts
     composite = collection.median().clip(region)
@@ -109,8 +111,9 @@ def get_cropland_mask(region: ee.Geometry) -> ee.Image:
 
 def compute_cultivated_stats(
     region: ee.Geometry,
-    year: int = 2024,
+    start_year: int = 2024,
     start_month: int = 1,
+    end_year: int = 2024,
     end_month: int = 12,
     cloud_threshold: int = 20,
     ndvi_threshold: float = 0.3,
@@ -128,7 +131,7 @@ def compute_cultivated_stats(
     init_ee()
 
     # --- Step 1–3: composites and masks ---
-    composite = get_sentinel2_composite(region, year, start_month, end_month, cloud_threshold)
+    composite = get_sentinel2_composite(region, start_year, start_month, end_year, end_month, cloud_threshold)
     ndvi = compute_ndvi(composite)
     cropland_mask = get_cropland_mask(region)
 
@@ -241,8 +244,9 @@ def generate_thumbnails(
     region: ee.Geometry,
     composite: ee.Image = None,
     ndvi: ee.Image = None,
-    year: int = 2024,
+    start_year: int = 2024,
     start_month: int = 1,
+    end_year: int = 2024,
     end_month: int = 12,
     cloud_threshold: int = 20,
     ndvi_threshold: float = 0.3,
@@ -260,7 +264,7 @@ def generate_thumbnails(
 
     # Build composite/NDVI if not provided
     if composite is None:
-        composite = get_sentinel2_composite(region, year, start_month, end_month, cloud_threshold)
+        composite = get_sentinel2_composite(region, start_year, start_month, end_year, end_month, cloud_threshold)
     if ndvi is None:
         ndvi = compute_ndvi(composite)
 
@@ -279,22 +283,35 @@ def generate_thumbnails(
     satellite_b64 = base64.b64encode(rgb_response.content).decode("utf-8")
 
     # ── Green mask thumbnail ──
-    # Binary mask: SOLID GREEN for NDVI > threshold, dark greyscale otherwise.
-    active_veg = ndvi.gt(ndvi_threshold)
+    # Gradient visualization: maps NDVI to green intensity.
+    # - NDVI < 0 (water/bare): dark
+    # - NDVI 0–0.3 (sparse):   very dim green
+    # - NDVI 0.3–0.6:          moderate green
+    # - NDVI 0.6–0.9:          bright green
+    # This is far more informative than a binary on/off mask.
 
-    # Dark greyscale base from the RGB bands
+    # Clamp NDVI to [0, 1] range for visualization
+    ndvi_clamped = ndvi.clamp(0, 1)
+
+    # Build gradient: green channel scales with NDVI, red/blue stay low
+    green_channel = ndvi_clamped.multiply(4000)       # 0 → 0, 1.0 → 4000
+    red_channel   = ndvi_clamped.multiply(400)        # slight warm tint
+    blue_channel  = ee.Image.constant(0)
+
+    # For pixels below threshold: show dark greyscale base
     grey = composite.select(["B4", "B3", "B2"]).reduce(ee.Reducer.mean())
     dark_base = ee.Image.cat(
-        grey.multiply(0.25), grey.multiply(0.25), grey.multiply(0.25),
+        grey.multiply(0.2), grey.multiply(0.2), grey.multiply(0.2),
     ).rename(["vis-red", "vis-green", "vis-blue"])
 
-    # Solid green overlay (bright enough to stand out clearly)
-    solid_green = ee.Image.constant([400, 3200, 400]).rename(
-        ["vis-red", "vis-green", "vis-blue"],
-    )
+    # Green gradient overlay
+    green_gradient = ee.Image.cat(
+        red_channel, green_channel, blue_channel,
+    ).rename(["vis-red", "vis-green", "vis-blue"])
 
-    # Where vegetation is active → solid green; otherwise → dark greyscale
-    highlighted = dark_base.where(active_veg, solid_green).clip(region)
+    # Where NDVI > threshold → gradient green; otherwise → dark greyscale
+    active_veg = ndvi.gt(ndvi_threshold)
+    highlighted = dark_base.where(active_veg, green_gradient).clip(region)
 
     mask_vis = {
         "bands": ["vis-red", "vis-green", "vis-blue"],

@@ -5,6 +5,9 @@ Compares *actual* weather at the plot location (from Open-Meteo API)
 against ideal growing conditions for the claimed crop.
 The comparison is parameter-by-parameter: temperature, rainfall, humidity.
 
+Also provides crop *recommendations* by scoring all known crops against
+actual weather conditions at the plot location.
+
 Data sources:
     - Crop dataset: curated from ICAR / FAO guidelines
     - Weather:      Open-Meteo Historical Weather API (free, no key)
@@ -18,18 +21,31 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
+# ──────────────────────────────────────────────────────────────
+# CONFIGURABLE — Change this to adjust weather history window.
+# 90 = last 3 months. Use 30 for 1 month, 180 for 6 months, etc.
+# ──────────────────────────────────────────────────────────────
+WEATHER_LOOKBACK_DAYS = 90
+
 
 # ──────────────────────────────────────────────────────────────
-# STEP 1 — Crop ideal-conditions dataset
-# Each crop has its optimal growing range for key parameters.
-# Sources: ICAR handbooks, FAO Ecocrop, state agri-university data.
+# STEP 1 — Crop ideal-conditions dataset (KERALA REGION)
+#
+# Sources:
+#   - Kerala Dept. of Agriculture statistics (2023-24)
+#   - Kerala Agricultural University (KAU) recommendations
+#   - CPCRI / Spices Board of India / ICAR-IISR guidelines
+#   - FAO Ecocrop database
+#
+# Rainfall ranges are PER 3-MONTH PERIOD (annual ÷ 4)
+# because we fetch the last ~90 days of weather data.
 # ──────────────────────────────────────────────────────────────
 
 @dataclass
 class CropProfile:
     """Ideal growing conditions for a crop."""
     name: str
-    baseline_yield: float       # tons / hectare (national median)
+    baseline_yield: float       # tons / hectare (Kerala state avg)
     temp_min_c: float           # minimum optimal temperature
     temp_max_c: float           # maximum optimal temperature
     rainfall_min_mm: float      # minimum 3-month rainfall (mm)
@@ -38,30 +54,59 @@ class CropProfile:
     humidity_max_pct: float     # maximum relative humidity %
 
 
+# fmt: off
 CROP_DATABASE: dict[str, CropProfile] = {
-    "rice":       CropProfile("Rice",       3.5,  22, 32, 300, 700, 60, 90),
-    "wheat":      CropProfile("Wheat",      3.2,  12, 25, 100, 300, 40, 70),
-    "maize":      CropProfile("Maize",      2.8,  18, 30, 200, 500, 50, 80),
-    "sugarcane":  CropProfile("Sugarcane",  70.0,  24, 38, 350, 700, 60, 85),
-    "cotton":     CropProfile("Cotton",      1.8,  21, 35, 150, 400, 40, 70),
-    "coconut":    CropProfile("Coconut",     6.0,  20, 32, 300, 600, 60, 90),
-    "rubber":     CropProfile("Rubber",      1.5,  25, 35, 400, 750, 70, 95),
-    "tea":        CropProfile("Tea",         2.0,  13, 28, 300, 600, 70, 90),
-    "coffee":     CropProfile("Coffee",      1.0,  15, 28, 250, 500, 60, 85),
-    "banana":     CropProfile("Banana",     30.0,  20, 35, 300, 600, 60, 90),
-    "potato":     CropProfile("Potato",     22.0,  10, 24, 100, 350, 50, 80),
-    "soybean":    CropProfile("Soybean",     1.2,  20, 30, 200, 500, 50, 80),
-    "groundnut":  CropProfile("Groundnut",   1.5,  22, 33, 150, 400, 50, 75),
-    "mustard":    CropProfile("Mustard",     1.1,  10, 25,  80, 250, 30, 65),
-    "onion":      CropProfile("Onion",      17.0,  13, 30, 100, 350, 40, 70),
-    "tomato":     CropProfile("Tomato",     25.0,  15, 30, 100, 350, 50, 75),
-    "pepper":     CropProfile("Pepper",      0.5,  20, 30, 350, 700, 65, 95),
-    "cardamom":   CropProfile("Cardamom",    0.2,  10, 25, 400, 800, 70, 95),
-    "turmeric":   CropProfile("Turmeric",    5.0,  20, 35, 350, 600, 60, 85),
-    "ginger":     CropProfile("Ginger",      4.0,  19, 30, 350, 600, 65, 90),
-}
+    # ─── FOOD CROPS ──────────────────────────────────────────
+    # Rice: Kerala avg 2.96 t/ha (2023-24), 3 seasons: Virippu/Mundakan/Puncha
+    "rice":       CropProfile("Rice",        2.96, 20, 35,  1500, 3000,  70, 90),
+    # Tapioca (Cassava): Major staple in Kerala, ~25 t/ha
+    "tapioca":    CropProfile("Tapioca",    25.0,  25, 30,  1000, 2000,  60, 85),
+    # Banana: Nendran, Palayamkodan, Robusta varieties, ~18 t/ha in Kerala
+    "banana":     CropProfile("Banana",     18.0,  15, 35,  1200, 2500,  65, 90),
+    # Maize: limited but grown in Palakkad belt
+    "maize":      CropProfile("Maize",       2.5,  18, 27,   500, 1000,  55, 80),
 
-DEFAULT_PROFILE = CropProfile("Unknown", 2.5, 18, 32, 200, 500, 50, 80)
+    # ─── PLANTATION CROPS ────────────────────────────────────
+    # Coconut: Kerala ~7,215 nuts/ha, ~6 t copra/ha
+    "coconut":    CropProfile("Coconut",     6.0,  27, 32,  1500, 2500,  80, 90),
+    # Rubber: Kerala avg ~1.63 t/ha (dry rubber)
+    "rubber":     CropProfile("Rubber",      1.63, 25, 34,  2000, 4000,  75, 95),
+    # Tea: Munnar/Wayanad belt, ~2 t/ha made tea
+    "tea":        CropProfile("Tea",         2.0,  13, 30,  1500, 3000,  70, 90),
+    # Coffee: Wayanad/Idukki, robusta dominant, ~1.05 t/ha
+    "coffee":     CropProfile("Coffee",      1.05, 20, 30,  1500, 2500,  70, 90),
+    # Arecanut: ~1.5 t dry kernel/ha
+    "arecanut":   CropProfile("Arecanut",    1.5,  14, 36,  1500, 5000,  70, 90),
+    # Cashew: Kerala avg, ~0.8 t/ha
+    "cashew":     CropProfile("Cashew",      0.8,  20, 35,  1000, 2000,  60, 80),
+
+    # ─── SPICE CROPS (Kerala = Spice Garden of India) ────────
+    # Black Pepper: ~0.4 t/ha (dried), Panniyur varieties
+    "pepper":     CropProfile("Pepper",      0.40, 20, 30,  2000, 3000,  75, 90),
+    # Cardamom: Idukki/Wayanad hills, ~0.2 t/ha
+    "cardamom":   CropProfile("Cardamom",    0.20, 15, 25,  1500, 4000,  75, 90),
+    # Ginger: Wayanad/Idukki, ~20 t/ha fresh (~4 t/ha dry)
+    "ginger":     CropProfile("Ginger",     20.0,  19, 30,  1500, 3000,  70, 90),
+    # Turmeric: ~25 t/ha fresh (~5 t/ha dry)
+    "turmeric":   CropProfile("Turmeric",   25.0,  20, 35,  1500, 2500,  70, 90),
+    # Nutmeg: Kerala = largest producer in India, ~0.35 t/ha dried
+    "nutmeg":     CropProfile("Nutmeg",      0.35, 20, 30,  1500, 2500,  75, 90),
+    # Clove: Nilambur/Kottayam belt, ~0.25 t/ha dried
+    "clove":      CropProfile("Clove",       0.25, 20, 30,  1500, 2500,  75, 90),
+    # Vanilla: ~0.3 t/ha cured beans (inter-cropped)
+    "vanilla":    CropProfile("Vanilla",     0.30, 21, 32,  1500, 3000,  75, 90),
+    # Cinnamon: Kerala/Karnataka, ~0.4 t/ha dried bark
+    "cinnamon":   CropProfile("Cinnamon",    0.40, 20, 30,  1500, 2500,  75, 90),
+
+    # ─── VEGETABLES & OTHERS ─────────────────────────────────
+    # Sugarcane: limited in Kerala (Palakkad), ~55 t/ha
+    "sugarcane":  CropProfile("Sugarcane",  55.0,  20, 35,  1500, 2500,  70, 85),
+    # Groundnut: Palakkad dry belt
+    "groundnut":  CropProfile("Groundnut",   1.3,  25, 30,   500, 1000,  50, 70),
+}
+# fmt: on
+
+DEFAULT_PROFILE = CropProfile("Unknown", 2.5, 22, 32, 250, 575, 60, 85)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -80,8 +125,8 @@ def fetch_weather_last_3_months(lat: float, lon: float) -> dict:
             "days_sampled": int,
         }
     """
-    end = date.today() - timedelta(days=1)   # yesterday (latest available)
-    start = end - timedelta(days=90)          # ~3 months back
+    end = date.today() - timedelta(days=1)          # yesterday (latest available)
+    start = end - timedelta(days=WEATHER_LOOKBACK_DAYS)  # configurable lookback
 
     url = "https://archive-api.open-meteo.com/v1/archive"
     params = {
@@ -274,3 +319,62 @@ def integrate_yield_score(previous_score: float, yield_feasibility_score: float)
     """
     overall = 0.8 * previous_score + 0.2 * yield_feasibility_score
     return round(min(1.0, max(0.0, overall)), 4)
+
+
+# ──────────────────────────────────────────────────────────────
+# Crop Recommendation (ranks ALL crops against actual weather)
+# ──────────────────────────────────────────────────────────────
+
+def recommend_crops(
+    lat: float,
+    lon: float,
+    mean_ndvi: float,
+    top_n: int = 5,
+) -> list[dict]:
+    """
+    Rank all crops by suitability for this location's recent weather.
+
+    1. Fetches weather for the last WEATHER_LOOKBACK_DAYS days.
+    2. Scores every crop in CROP_DATABASE using the same _range_score logic.
+    3. Returns the top_n crops sorted by overall suitability (descending).
+
+    Each item in the returned list:
+        {
+            "rank": 1,
+            "crop": "Rice",
+            "suitability_pct": 82,
+            "temp_score": 1.0,
+            "rain_score": 0.6,
+            "humidity_score": 0.9,
+            "vegetation_score": 1.0,
+            "baseline_yield": 3.5,
+        }
+    """
+    weather = fetch_weather_last_3_months(lat, lon)
+
+    scored: list[tuple[str, dict, float]] = []
+    for _key, profile in CROP_DATABASE.items():
+        scores = compare_conditions(profile, weather, mean_ndvi)
+        scored.append((profile.name, profile, scores))
+
+    # Sort descending by overall_score
+    scored.sort(key=lambda x: x[2]["overall_score"], reverse=True)
+
+    recommendations = []
+    for rank, (name, profile, scores) in enumerate(scored[:top_n], start=1):
+        recommendations.append({
+            "rank": rank,
+            "crop": name,
+            "suitability_pct": round(scores["overall_score"] * 100),
+            "temp_score": scores["temp_score"],
+            "rain_score": scores["rain_score"],
+            "humidity_score": scores["humidity_score"],
+            "vegetation_score": scores["vegetation_score"],
+            "baseline_yield": profile.baseline_yield,
+        })
+
+    logger.info(
+        "Crop recommendations: %s",
+        [(r["rank"], r["crop"], r["suitability_pct"]) for r in recommendations],
+    )
+    return recommendations

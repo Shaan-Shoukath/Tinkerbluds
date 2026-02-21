@@ -612,11 +612,11 @@
         </div>
         <div class="options-row">
           <div class="option-group">
-            <label>Year</label>
+            <label>Start Year</label>
             <input
               type="number"
-              id="yearInput"
-              value="2024"
+              id="startYearInput"
+              value="2025"
               min="2015"
               max="2026"
             />
@@ -637,6 +637,16 @@
               <option value="11">Nov</option>
               <option value="12">Dec</option>
             </select>
+          </div>
+          <div class="option-group">
+            <label>End Year</label>
+            <input
+              type="number"
+              id="endYearInput"
+              value="2025"
+              min="2015"
+              max="2026"
+            />
           </div>
           <div class="option-group">
             <label>To</label>
@@ -1067,6 +1077,49 @@
         </div>
       </div>
 
+      <!-- Crop Recommendations -->
+      <div id="recoSection" style="display: none; margin-top: 2rem">
+        <div
+          style="
+            background: linear-gradient(145deg, #141a2e, #1a2040);
+            border: 1px solid rgba(99, 179, 237, 0.08);
+            border-radius: 12px;
+            padding: 1.2rem;
+          "
+        >
+          <div
+            style="
+              font-size: 0.72rem;
+              color: #718096;
+              text-transform: uppercase;
+              letter-spacing: 0.06em;
+              margin-bottom: 1rem;
+            "
+          >
+            🌾 Best Crops for This Location
+          </div>
+          <div
+            id="recoCards"
+            style="
+              display: grid;
+              grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+              gap: 0.8rem;
+            "
+          ></div>
+          <div
+            style="
+              margin-top: 0.8rem;
+              font-size: 0.6rem;
+              color: #718096;
+              font-style: italic;
+            "
+          >
+            Based on weather data from the last 90 days. Scores use temperature,
+            rainfall, humidity, and vegetation health.
+          </div>
+        </div>
+      </div>
+
       <!-- How It Works (shown after results) -->
       <div class="explanation" id="explanation">
         <h2>🔬 How This Classification Works</h2>
@@ -1237,14 +1290,15 @@
         const stepInterval = animateSteps();
         const formData = new FormData();
         formData.append("file", selectedFile);
-        const year = document.getElementById("yearInput").value;
+        const startYear = document.getElementById("startYearInput").value;
         const sm = document.getElementById("startMonth").value;
+        const endYear = document.getElementById("endYearInput").value;
         const em = document.getElementById("endMonth").value;
         const cloud = document.getElementById("cloudInput").value;
         const crop = document.getElementById("cropInput").value;
 
         try {
-          let url = `/validate_plot?year=${year}&start_month=${sm}&end_month=${em}&cloud_threshold=${cloud}`;
+          let url = `/validate_plot?start_year=${startYear}&start_month=${sm}&end_year=${endYear}&end_month=${em}&cloud_threshold=${cloud}`;
           if (crop) url += `&claimed_crop=${encodeURIComponent(crop)}`;
           const res = await fetch(url, {
             method: "POST",
@@ -1476,6 +1530,61 @@
           }
         } else {
           document.getElementById("yieldSection").style.display = "none";
+        }
+
+        // Crop Recommendations (always show if data available)
+        if (data.recommended_crops && data.recommended_crops.length > 0) {
+          document.getElementById("recoSection").style.display = "block";
+          const recoContainer = document.getElementById("recoCards");
+          let recoHtml = "";
+          data.recommended_crops.forEach((crop) => {
+            const pct = crop.suitability_pct;
+            const barColor =
+              pct >= 70 ? "#68d391" : pct >= 40 ? "#f6e05e" : "#fc8150";
+            const rankEmoji =
+              crop.rank === 1
+                ? "🥇"
+                : crop.rank === 2
+                  ? "🥈"
+                  : crop.rank === 3
+                    ? "🥉"
+                    : "#" + crop.rank;
+            const borderColor =
+              crop.rank === 1
+                ? "rgba(255,215,0,0.25)"
+                : crop.rank === 2
+                  ? "rgba(192,192,192,0.2)"
+                  : crop.rank === 3
+                    ? "rgba(205,127,50,0.2)"
+                    : "rgba(99,179,237,0.08)";
+            recoHtml += `
+              <div style="
+                background: linear-gradient(135deg, rgba(26,32,64,0.9), rgba(20,26,46,0.95));
+                border: 1px solid ${borderColor};
+                border-radius: 10px;
+                padding: 0.8rem;
+                text-align: center;
+                transition: transform 0.2s ease, box-shadow 0.2s ease;
+                cursor: default;
+              " onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 20px rgba(0,0,0,0.3)';" onmouseout="this.style.transform='';this.style.boxShadow='';">
+                <div style="font-size: 1.2rem; margin-bottom: 0.3rem;">${rankEmoji}</div>
+                <div style="color: #e2e8f0; font-weight: 600; font-size: 0.8rem; margin-bottom: 0.3rem;">${crop.crop}</div>
+                <div style="font-size: 1.4rem; font-weight: 700; color: ${barColor}; margin-bottom: 0.3rem;">${pct}%</div>
+                <div style="font-size: 0.55rem; color: #718096; margin-bottom: 0.5rem;">suitability</div>
+                <div style="height: 5px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; margin-bottom: 0.5rem;">
+                  <div style="height: 100%; width: ${pct}%; background: ${barColor}; border-radius: 3px; transition: width 0.6s ease;"></div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.2rem; font-size: 0.52rem; color: #a0aec0;">
+                  <div>🌡️ ${(crop.temp_score * 100).toFixed(0)}%</div>
+                  <div>🌧️ ${(crop.rain_score * 100).toFixed(0)}%</div>
+                  <div>💧 ${(crop.humidity_score * 100).toFixed(0)}%</div>
+                  <div>🌿 ${(crop.vegetation_score * 100).toFixed(0)}%</div>
+                </div>
+              </div>`;
+          });
+          recoContainer.innerHTML = recoHtml;
+        } else {
+          document.getElementById("recoSection").style.display = "none";
         }
       }
     </script>

@@ -8,13 +8,24 @@ Usage:
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from plot_validation.earth_engine_service import init_ee
 from plot_validation.router import router as plot_validation_router
+
+
+class NoCacheMiddleware(BaseHTTPMiddleware):
+    """Prevent browsers from serving stale cached responses."""
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
 
 # ──────────────────────────────────────────────
 # Logging
@@ -40,6 +51,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(NoCacheMiddleware)
 
 # ──────────────────────────────────────────────
 # Routers
