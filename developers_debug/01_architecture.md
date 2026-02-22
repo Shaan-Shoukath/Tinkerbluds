@@ -62,7 +62,10 @@ When a user uploads `field.kml`:
    a. Filters Sentinel-2 collection (year, cloud, region)
    b. Computes median composite → NDVI mean + temporal stddev
    c. Loads WorldCover, creates cropland mask
-   d. Intersects: cultivated = cropland AND NDVI > 0.3
+   d. Cultivated = ESA WorldCover cropland (directly trusted)
+      ESA is trained on multi-year S1+S2 temporal stacks — no extra
+      single-image threshold needed. Active vegetation (NDVI > 0.3)
+      is kept as a separate health indicator only.
    e. Fetches Sentinel-1 SAR (VH, VV) → computes VH/VV ratio + SAR crop score
    f. Fetches SRTM DEM → elevation + slope
    g. Computes area stats + per-class breakdown via reduceRegion
@@ -75,7 +78,9 @@ When a user uploads `field.kml`:
 8. Router converts m² to acres, extracts polygon coords
 9. Thumbnails: satellite RGB + NDVI mask + SAR radar (3 images)
 10. If claimed_crop is provided:
-    a. yield_service.py fetches last 90 days of weather + soil moisture
+    a. yield_service.py fetches weather for the user's chosen timeline
+       (start_year/month → end_year/month) passed from the UI.
+       Falls back to crop growing season or last 90 days if not provided.
     b. Compares actual vs ideal conditions (5 params)
     c. Estimates yield, detects critical failures
     d. Integrates yield score into overall confidence

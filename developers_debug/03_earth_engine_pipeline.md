@@ -17,11 +17,13 @@ compute_ndvi()                 compute_sar_stats()                  │
     │                           VH, VV, VH/VV ratio                 │
     ▼                                    │                          │
 NDVI > 0.3 (active_veg)                 │                          │
+  [health indicator only]               │                          │
     │                                    │                          │
     ├── get_cropland_mask()              │                          │
     │   WorldCover == 40                 │                          │
     │                                    │                          │
-    └──── cultivated = cropland AND veg  │                          │
+    └──── cultivated = cropland          │                          │
+         (ESA trusted directly)          │                          │
                │                         │                          │
                ▼                         ▼                          ▼
          ┌─────────────────────────────────────────────────────────────┐
@@ -29,6 +31,27 @@ NDVI > 0.3 (active_veg)                 │                          │
          │         SINGLE batched network call for ALL features       │
          └─────────────────────────────────────────────────────────────┘
 ```
+
+### Why Cultivated = ESA Cropland Directly?
+
+The previous logic was `cultivated = cropland AND (NDVI > 0.3)`, but this
+failed catastrophically when optical imagery was limited or cloudy:
+
+| Scenario                               | NDVI | Old Result       | New Result   |
+| -------------------------------------- | ---- | ---------------- | ------------ |
+| 1 cloudy S2 image, ESA says 100% crops | 0.08 | **0% cultiv.**   | 100% cultiv. |
+| Monsoon season, few clear images       | 0.15 | **2–5% cultiv.** | 100% cultiv. |
+| Clear sky, active crops visible        | 0.55 | 100% cultiv.     | 100% cultiv. |
+| Forest area (ESA = Trees)              | 0.72 | 0% (correct)     | 0% (correct) |
+
+ESA WorldCover v200 is a 10m ML classification trained on **multi-year**
+Sentinel-1 + Sentinel-2 temporal stacks. It already incorporates SAR,
+optical, and temporal NDVI in its training pipeline. Our single-image
+NDVI threshold was redundant and broke when imagery was limited.
+
+**Active Vegetation (NDVI > 0.3)** is now kept as a **separate health
+indicator** — shown in the dashboard for reference but NOT used as a gate
+for cultivated land.
 
 ---
 
@@ -233,9 +256,9 @@ Collects ALL features in a **single batched** `.getInfo()` call:
 ```python
 batch = {
     "total_area":      total_area_stat,      # pixel areas summed
-    "cropland_area":   cropland_area_stat,   # WorldCover == 40
-    "active_veg_area": active_veg_stat,      # NDVI > 0.3
-    "cultivated_area": cultivated_stat,      # cropland AND active_veg
+    "cropland_area":   cropland_area_stat,   # WorldCover == 40 (= cultivated)
+    "active_veg_area": active_veg_stat,      # NDVI > 0.3 (health indicator)
+    "cultivated_area": cultivated_stat,      # = cropland (ESA trusted directly)
     "mean_ndvi":       mean_ndvi_stat,       # NDVI mean
     "ndvi_stddev":     ndvi_stddev_stat,     # temporal NDVI std deviation
     "mean_vh":         sar_vh_stat,          # Sentinel-1 VH
@@ -246,6 +269,11 @@ batch = {
 }
 results = ee.Dictionary(batch).getInfo()     # ← ONE network call
 ```
+
+> **Design Note:** `cultivated_area` now equals `cropland_area` since cultivated
+> is directly mapped from ESA WorldCover. Active vegetation (NDVI > 0.3) is
+> tracked separately as a health metric. The `cultivated_percentage` in the
+> validation response is calculated as `cropland_area / total_area`.
 
 **Why batch?** Each `.getInfo()` call takes 3–8 seconds (network latency + cloud computation). By batching all 15+ statistics into one call, we avoid making 15 separate round trips. Total time ≈ 5–10 seconds instead of 45–120 seconds.
 

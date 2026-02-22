@@ -16,6 +16,53 @@ This platform solves these problems by **fusing four independent data sources** 
 
 ---
 
+## Satellite Data Primer — What NDVI, SAR, VH, VV Mean
+
+Before diving into the pipeline, here's a quick reference for the remote-sensing terms used throughout the system:
+
+| Term               | Full Name                                                | What It Is                                                                                                                                                                          | How We Use It                                                                                                                                                                                                                                         |
+| ------------------ | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **NDVI**           | Normalized Difference Vegetation Index                   | A ratio of near-infrared vs red light reflected by plants: `(B8 − B4) / (B8 + B4)`. Ranges −1 to +1; healthy green vegetation → 0.3–0.9, bare soil → 0–0.2, water → negative.       | **Health indicator** — shows how green/active the land is right now. NDVI _temporal standard deviation_ (how much it changes across months) is the #1 ML feature (71.6%) because crops change seasonally while forests stay green.                    |
+| **SAR**            | Synthetic Aperture Radar                                 | Active microwave radar (Sentinel-1, C-band 5.4 GHz) that sends pulses and measures the backscattered signal. Works through clouds, rain, and at night — unlike optical satellites.  | Provides **cloud-proof** crop structure data. Essential during monsoon season when optical imagery is unusable for months.                                                                                                                            |
+| **VH**             | Vertical-transmit, Horizontal-receive polarization       | SAR sends a vertically polarized wave; measures the horizontally polarized return. Sensitive to _volume scattering_ from crop canopies and leaves. Typical farmland: −15 to −10 dB. | Higher VH from crop canopy volume scattering vs lower VH from bare soil or water. Used in the SAR crop score (40% weight) and as ML feature #4.                                                                                                       |
+| **VV**             | Vertical-transmit, Vertical-receive polarization         | SAR sends and receives the same (vertical) polarization. Sensitive to _surface roughness_ and _double-bounce_ from vertical structures (tree trunks, buildings).                    | VV alone is less useful for crops, but the **VH/VV ratio** is key — it separates crop canopy (moderate ratio ~0.4–0.65) from forest (low ratio, strong VV trunk return) and urban (high ratio, multi-bounce).                                         |
+| **VH/VV Ratio**    | Polarization ratio                                       | VH divided by VV (in linear scale). Indicates dominant scattering mechanism.                                                                                                        | **ML feature #2** (14.5% importance). Crops = 0.4–0.65, Forest = 0.15–0.35, Urban = 0.7–0.9, Water = 0.1–0.2. The SAR crop score gives this 60% weight.                                                                                               |
+| **ESA WorldCover** | ESA's global 10m land classification                     | ML-classified land-use map (Random Forest trained on multi-year Sentinel-1 + Sentinel-2 temporal stacks). Class 40 = Cropland.                                                      | **Cultivated land** is determined directly from this — if ESA classifies a pixel as cropland, we trust it. No additional NDVI gating needed because ESA's multi-year ML is more robust than any single-scene threshold.                               |
+| **SRTM DEM**       | Shuttle Radar Topography Mission Digital Elevation Model | NASA elevation data at 30m resolution.                                                                                                                                              | Provides **elevation** (metres) and **slope** (degrees). Steep slopes (>15°) are impractical for farming; high elevation limits crop options. ML features #5–6.                                                                                       |
+| **NDVI StdDev**    | NDVI temporal standard deviation                         | How much NDVI varies across the analysis period (computed from all available Sentinel-2 images).                                                                                    | **The most powerful single feature** (71.6% ML weight). Crops cycle through planting → growth → harvest → fallow = high stddev. Evergreen forest stays constant = low stddev. This one metric separates farms from forests better than anything else. |
+
+### How These Combine Into a Decision
+
+```
+  Optical (Sentinel-2)          Radar (Sentinel-1)          Terrain (SRTM)
+  ├─ NDVI mean (greenness)      ├─ VH backscatter (dB)      ├─ Elevation (m)
+  ├─ NDVI stddev (seasonality)  ├─ VV backscatter (dB)      └─ Slope (degrees)
+  └─ Active veg area            └─ VH/VV ratio
+          │                             │                         │
+          └─────────────┬───────────────┘                         │
+                        │         ESA WorldCover                  │
+                        │         └─ Cropland % (class 40)        │
+                        │                │                        │
+                        └────────────────┼────────────────────────┘
+                                         │
+                                    8 features
+                                         │
+                                  ┌──────▼──────┐
+                                  │   XGBoost   │
+                                  │  Classifier │
+                                  └──────┬──────┘
+                                         │
+                              agricultural probability
+                                  PASS / REVIEW / FAIL
+```
+
+> **Key design decision:** Cultivated land = ESA WorldCover cropland directly.
+> We do NOT require `NDVI > 0.3` on top of ESA. WorldCover is trained on
+> multi-year S1+S2 stacks and is more robust than any single-image threshold,
+> especially during cloudy monsoon seasons when Sentinel-2 imagery is scarce.
+
+---
+
 ## How It Works — End-to-End Pipeline
 
 ```
@@ -204,12 +251,12 @@ Each crop now has a `season_start` and `season_end` month. The system automatica
 
 ### 1. A plot validation score indicating:
 
-| Sub-requirement                           | Status | Implementation                                                                                                   |
-| ----------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------- |
-| **Whether the plot exists**               | ✅     | KML polygon → Sentinel-2 imagery → satellite thumbnail confirms physical land at coordinates                     |
-| **Whether it is agricultural land**       | ✅     | WorldCover (Cropland) ∩ NDVI > 0.3 + SAR VH/VV ratio + terrain → 8-feature XGBoost classification                |
-| **Whether the claimed crop is plausible** | ✅     | 20-crop Kerala DB × **season-aware** weather (temp, rain, humidity, soil moisture, NDVI); unsuitability warnings |
-| **Supporting evidence layers**            | ✅     | Satellite RGB + NDVI gradient mask + SAR backscatter thumbnails, land class chart, weather table                 |
+| Sub-requirement                           | Status | Implementation                                                                                                                     |
+| ----------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| **Whether the plot exists**               | ✅     | KML polygon → Sentinel-2 imagery → satellite thumbnail confirms physical land at coordinates                                       |
+| **Whether it is agricultural land**       | ✅     | WorldCover (Cropland, directly trusted) + SAR VH/VV ratio + NDVI temporal variability + terrain → 8-feature XGBoost classification |
+| **Whether the claimed crop is plausible** | ✅     | 20-crop Kerala DB × **season-aware** weather (temp, rain, humidity, soil moisture, NDVI); unsuitability warnings                   |
+| **Supporting evidence layers**            | ✅     | Satellite RGB + NDVI gradient mask + SAR backscatter thumbnails, land class chart, weather table                                   |
 
 ### 2. Clear pass/fail or confidence-based decision logic
 
@@ -432,9 +479,9 @@ Marks an overlap alert as resolved.
 
 | Metric                  | Formula                                                                                  |
 | ----------------------- | ---------------------------------------------------------------------------------------- |
-| **Cultivated %**        | (Cropland ∩ Active Vegetation) / Total Plot Area × 100                                   |
+| **Cultivated %**        | ESA WorldCover Cropland area / Total Plot Area × 100 (no NDVI gating)                    |
 | **Confidence Score**    | ML: XGBoost probability; Fallback: 0.7×(0.7×cultivated% + 0.3×NDVI) + 0.3×SAR_crop_score |
-| **Overall (with crop)** | 0.6 × confidence + 0.4 × yield_feasibility                                               |
+| **Overall (with crop)** | 0.8 × confidence + 0.2 × yield_feasibility                                               |
 | **Crop Suitability**    | 25% temp + 25% rain + 10% humidity + 15% soil + 25% vegetation                           |
 | **Estimated Yield**     | baseline_yield × overall_suitability                                                     |
 
@@ -514,7 +561,8 @@ Tinkerbluds/
 │   ├── 04_validation_scoring.md      ← ML classifier + scoring formulas
 │   ├── 05_dashboard_frontend.md      ← Frontend JS/CSS walkthrough
 │   ├── 06_supabase_overlap.md        ← Supabase + overlap detection
-│   └── 07_yield_service.md           ← Yield, crop DB, soil moisture, warnings
+│   ├── 07_yield_service.md           ← Yield, crop DB, soil moisture, warnings
+│   └── 08_changelog.md              ← Design changes and bug-fix history
 ├── requirements.txt
 └── .env                              ← EE_PROJECT_ID + Supabase keys
 ```
@@ -533,7 +581,7 @@ Tinkerbluds/
 
 ## For Developers
 
-See [`developers_debug/`](developers_debug/) for 8 detailed docs covering:
+See [`developers_debug/`](developers_debug/) for detailed docs covering:
 
 - System architecture and request lifecycle
 - Earth Engine pipeline (Sentinel-2 + Sentinel-1 SAR + SRTM terrain)

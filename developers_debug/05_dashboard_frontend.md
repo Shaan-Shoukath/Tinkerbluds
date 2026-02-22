@@ -24,9 +24,9 @@ How the browser UI works — upload flow, API communication, result rendering, a
 │  Map Preview (Leaflet + Esri satellite tiles)   │
 ├─────────────────────────────────────────────────┤
 │  Results: 4 stat cards + PASS/REVIEW badge      │
-│  ┌─────────┬─────────┬─────────┬─────────┐     │
-│  │Plot Area│Cropland │Veg Area │Cultiv.% │     │
-│  └─────────┴─────────┴─────────┴─────────┘     │
+│  ┌─────────┬──────────┬──────────┬──────────┐   │
+│  │Plot Area│Active Veg│Cultivated│Cropland% │   │
+│  └─────────┴──────────┴──────────┴──────────┘   │
 │  Confidence bar + ML badge (🤖 ML or 📊 Fused)  │
 │  SAR Stats: SAR Score | VH/VV | Elevation | Slope │
 │  Land class breakdown (horizontal bar chart)    │
@@ -211,7 +211,7 @@ After the stat cards, when a crop is claimed, the dashboard shows:
 │                                                 │
 │  CROP: Tea    EST: 1.10 t/ha   TOTAL: 0.71 t   │
 │                                                 │
-│  ACTUAL VS IDEAL CONDITIONS (LAST 90 DAYS)      │
+│  ACTUAL VS IDEAL CONDITIONS (user's timeline)   │
 │  🌡️ Temperature  27.3°C   13–30°C      ████ 100%│
 │  🌧️ Rainfall     33.3mm   1500–3000mm       0%│
 │  💧 Humidity     55.9%    70–90%             0%│
@@ -292,3 +292,19 @@ if (data.decision === "FAIL") {
 ```
 
 The `cultivated_percentage` is sent along with the confirmation, enabling the backend to compute the **effective cultivated area** (`area_acres × cultivated_percentage / 100`).
+
+> **Note (v2025-06):** `cultivated_percentage` now equals the ESA
+> WorldCover cropland fraction (class 40) of the plot. It no longer
+> requires live NDVI > 0.3 gating — so 100% ESA-classified cropland
+> correctly reports as 100% cultivated.
+
+---
+
+## Stat Card Descriptions
+
+| Card            | Description Text (subtitle)                                                                      |
+| --------------- | ------------------------------------------------------------------------------------------------ |
+| **Plot Area**   | Total surveyed area                                                                              |
+| **Active Veg.** | Sentinel-2 NDVI and Sentinel-1 SAR radar backscatter — _health indicator_, not a cultivated gate |
+| **Cultivated**  | ESA WorldCover ML-classified farmland — trained on multi-year Sentinel-1 & Sentinel-2 data       |
+| **Cropland %**  | Percentage of the plot classified as farmland by ESA WorldCover                                  |

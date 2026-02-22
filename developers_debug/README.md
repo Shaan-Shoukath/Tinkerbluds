@@ -15,6 +15,7 @@ This folder contains detailed technical documentation for every module in the Ti
 | [05_dashboard_frontend.md](05_dashboard_frontend.md)       | **Dashboard Frontend** — Single-file `index.html` architecture, glassmorphism CSS, JavaScript state management, Leaflet map, 3-column image previews (satellite + green mask + SAR), ML badge, SAR stats panel, yield feasibility section, crop recommendation cards      |
 | [06_supabase_overlap.md](06_supabase_overlap.md)           | **Supabase Integration & Overlap Detection** — Farmer DB (CRUD by phone), plot storage (GeoJSON + KML), area adjustment (cultivated %), Shapely-based overlap detection (5% threshold), FAIL guard, admin alerts, confirmation UI flow, SQL schema, API endpoints         |
 | [07_yield_service.md](07_yield_service.md)                 | **Yield Service & Crop Recommendations** — 20-crop Kerala database with soil moisture ranges, Open-Meteo weather API (temp, rain, humidity, soil moisture), 5-parameter scoring, unsuitability warnings, critical failure detection, `estimate_yield` & `recommend_crops` |
+| [08_changelog.md](08_changelog.md)                         | **Changelog** — Chronological log of significant design changes, bug fixes, and architectural decisions with rationale                                                                                                                                                    |
 
 ---
 
@@ -29,6 +30,7 @@ If you're new to the codebase, read the docs in order:
 5. **Dashboard** (05) — how results are displayed
 6. **Supabase** (06) — farmer DB, plot storage, overlap detection
 7. **Yield Service** (07) — crop feasibility, soil moisture, warnings
+8. **Changelog** (08) — design changes and bug-fix history
 
 ---
 

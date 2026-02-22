@@ -21,14 +21,24 @@ Both use a 20-crop Kerala-specific database and live weather data from Open-Mete
 
 ```
 User claims "Cardamom" on plot at (10.05°N, 76.32°E)
+User chose timeline: start_year=2024, start_month=6, end_year=2024, end_month=9
                     │
                     ▼
 ┌──────────────────────────────────────────┐
-│  Open-Meteo API  (last 90 days)          │
-│  → avg_temp_c: 27.3°C                   │
-│  → total_rainfall_mm: 33.3mm            │
-│  → avg_humidity_pct: 55.9%              │
-│  → avg_soil_moisture: 0.234 m³/m³       │
+│  Weather Fetch — Fallback Chain               │
+│                                              │
+│  1️⃣ User timeline provided?                    │
+│     → fetch_weather_for_period(2024-06, 2024-09)│
+│  2️⃣ Crop growing season known?                 │
+│     → fetch_weather_for_season(lat, lon, crop) │
+│  3️⃣ Fallback: last 90 days                     │
+│     → fetch_weather_last_3_months(lat, lon)    │
+│                                              │
+│  Result:                                     │
+│  → avg_temp_c: 27.3°C                        │
+│  → total_rainfall_mm: 1450mm                 │
+│  → avg_humidity_pct: 78.2%                   │
+│  → avg_soil_moisture: 0.312 m³/m³            │
 └──────────────────┬───────────────────────┘
                    │
 ┌──────────────────▼───────────────────────┐
@@ -221,18 +231,35 @@ Combines both checks into a single response:
 
 ## Weather Data Source
 
+The yield service fetches weather from the **Open-Meteo Historical Weather API** using a three-level fallback chain:
+
+### 1. `fetch_weather_for_period(lat, lon, start_year, start_month, end_year, end_month)`
+
+Used when the user supplies an explicit timeline in the UI (year, from-month, to-month). Builds the exact date range from the user's selection:
+
 ```python
-fetch_weather_last_3_months(lat, lon)
+start_date = f"{start_year}-{start_month:02d}-01"
+end_date   = last day of end_year/end_month
 ```
 
-Calls the **Open-Meteo Historical Weather API** for the last 90 days:
+### 2. `fetch_weather_for_season(lat, lon, crop_name)`
+
+Used when no user timeline is provided but the claimed crop has a known growing season (e.g. Rice → June–October). Currently not populated for most crops, so this step is skipped in practice.
+
+### 3. `fetch_weather_last_3_months(lat, lon)` **(original fallback)**
+
+Used when neither a user timeline nor a crop season is available. Fetches the last 90 days from today.
+
+### Common API Call
+
+All three functions call the same endpoint:
 
 ```
 https://archive-api.open-meteo.com/v1/archive
   ?latitude=10.05
   &longitude=76.32
-  &start_date=2025-11-23
-  &end_date=2026-02-21
+  &start_date=2024-06-01
+  &end_date=2024-09-30
   &daily=temperature_2m_mean,precipitation_sum,relative_humidity_2m_mean,soil_moisture_0_to_7cm_mean
   &timezone=Asia/Kolkata
 ```
@@ -245,6 +272,28 @@ Returns aggregated values:
 | `total_rainfall_mm` | Sum         | mm    |
 | `avg_humidity_pct`  | Mean        | %     |
 | `avg_soil_moisture` | Mean        | m³/m³ |
+
+### Fallback Priority in `estimate_yield()`
+
+```python
+def estimate_yield(crop_name, mean_ndvi, lat, lon, area_hectares,
+                   start_year=None, start_month=None,
+                   end_year=None, end_month=None):
+    # 1. User timeline (if all 4 params provided)
+    if start_year and start_month and end_year and end_month:
+        weather = fetch_weather_for_period(lat, lon, start_year, start_month, end_year, end_month)
+    # 2. Crop growing season
+    elif crop has known season:
+        weather = fetch_weather_for_season(lat, lon, crop_name)
+    # 3. Last 90 days
+    else:
+        weather = fetch_weather_last_3_months(lat, lon)
+```
+
+> **Design note:** The user-chosen timeline is the most meaningful
+> comparison — it covers the exact period they intend to farm,
+> so weather data for that window produces the most accurate
+> feasibility assessment.
 
 ---
 

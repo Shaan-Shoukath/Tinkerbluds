@@ -93,11 +93,15 @@ fused_score   = 0.7 × optical_score  + 0.3 × sar_crop_score
 → fused_score becomes the agricultural_probability
 ```
 
-| Weight          | Component      | What It Measures                        |
-| --------------- | -------------- | --------------------------------------- |
-| 49% (0.7 × 0.7) | Cultivated %   | How much of the plot is active farmland |
-| 21% (0.7 × 0.3) | Mean NDVI      | Vegetation health                       |
-| 30%             | SAR crop score | Radar-based crop structure              |
+> **Note:** `cultivated_pct` is now `cropland_area / total_area` — derived
+> directly from ESA WorldCover (class 40). It no longer requires NDVI > 0.3
+> gating, so 100% ESA-classified cropland = 100% cultivated.
+
+| Weight          | Component      | What It Measures                             |
+| --------------- | -------------- | -------------------------------------------- |
+| 49% (0.7 × 0.7) | Cultivated %   | ESA WorldCover cropland fraction of the plot |
+| 21% (0.7 × 0.3) | Mean NDVI      | Vegetation health (real-time indicator)      |
+| 30%             | SAR crop score | Radar-based crop structure                   |
 
 ---
 
@@ -197,8 +201,8 @@ When `claimed_crop` is provided, yield score integrates into confidence:
 
 ```python
 def integrate_yield_score(base_confidence, yield_feasibility_score):
-    """Combined score = 60% land validation + 40% crop feasibility"""
-    return round(0.6 * base_confidence + 0.4 * yield_feasibility_score, 4)
+    """Combined score = 80% land validation + 20% crop feasibility"""
+    return round(0.8 * base_confidence + 0.2 * yield_feasibility_score, 4)
 ```
 
 ### Yield Parameter Weights
