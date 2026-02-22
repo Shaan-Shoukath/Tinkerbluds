@@ -28,6 +28,11 @@ class ValidationResponse(BaseModel):
     weather_actual: dict = {}
     crop_ideal: dict = {}
     parameter_scores: dict = {}
+    # Unsuitability warnings
+    is_unsuitable: bool = False
+    has_critical_failure: bool = False
+    yield_warning: str = ""
+    unsuitability_reasons: list = []
     # Crop recommendations
     recommended_crops: list = []
 

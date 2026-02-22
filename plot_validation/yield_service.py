@@ -346,6 +346,48 @@ def _generate_unsuitability_reasons(
     return reasons
 
 
+def _build_yield_warning(scores: dict, reasons: list[dict], profile_name: str) -> dict:
+    """
+    Determine the yield warning level based on scores.
+
+    Returns:
+        {
+            "is_unsuitable": bool,         # overall < 40%
+            "has_critical_failure": bool,   # ANY param at 0% or near-zero
+            "yield_warning": str,           # human-readable warning message
+        }
+    """
+    overall = scores["overall_score"]
+
+    # Check if any individual parameter is critically low (≤ 5%)
+    critical_params = []
+    param_labels = {
+        "temp_score": "Temperature",
+        "rain_score": "Rainfall",
+        "humidity_score": "Humidity",
+        "soil_score": "Soil Moisture",
+    }
+    for key, label in param_labels.items():
+        if scores.get(key, 1.0) <= 0.05:
+            critical_params.append(label)
+
+    has_critical = len(critical_params) > 0
+    is_unsuitable = overall < UNSUITABILITY_THRESHOLD
+
+    if is_unsuitable:
+        warning = f"🚫 {profile_name} is NOT RECOMMENDED for this region — overall suitability only {overall*100:.0f}%"
+    elif has_critical:
+        warning = f"⚠️ {profile_name} will have POOR YIELD here — {', '.join(critical_params)} critically low"
+    else:
+        warning = ""
+
+    return {
+        "is_unsuitable": is_unsuitable,
+        "has_critical_failure": has_critical,
+        "yield_warning": warning,
+    }
+
+
 # ──────────────────────────────────────────────────────────────
 # Public API
 # ──────────────────────────────────────────────────────────────
@@ -393,6 +435,9 @@ def estimate_yield(
         crop_key, overall, estimated_yield, confidence,
     )
 
+    # Unsuitability & critical-failure warnings
+    warn = _build_yield_warning(scores, _generate_unsuitability_reasons(profile, weather, scores), profile.name)
+
     return {
         "claimed_crop": profile.name,
         "baseline_yield": profile.baseline_yield,
@@ -401,7 +446,9 @@ def estimate_yield(
         "yield_feasibility_score": scores["overall_score"],
         "yield_confidence": confidence,
         # Unsuitability warnings
-        "is_unsuitable": scores["overall_score"] < UNSUITABILITY_THRESHOLD,
+        "is_unsuitable": warn["is_unsuitable"],
+        "has_critical_failure": warn["has_critical_failure"],
+        "yield_warning": warn["yield_warning"],
         "unsuitability_reasons": _generate_unsuitability_reasons(profile, weather, scores),
         # Per-parameter comparison
         "weather_actual": {
@@ -479,6 +526,7 @@ def recommend_crops(
 
     recommendations = []
     for rank, (name, profile, scores, reasons) in enumerate(scored[:top_n], start=1):
+        warn = _build_yield_warning(scores, reasons, name)
         recommendations.append({
             "rank": rank,
             "crop": name,
@@ -489,7 +537,9 @@ def recommend_crops(
             "soil_score": scores["soil_score"],
             "vegetation_score": scores["vegetation_score"],
             "baseline_yield": profile.baseline_yield,
-            "is_unsuitable": scores["overall_score"] < UNSUITABILITY_THRESHOLD,
+            "is_unsuitable": warn["is_unsuitable"],
+            "has_critical_failure": warn["has_critical_failure"],
+            "yield_warning": warn["yield_warning"],
             "unsuitability_reasons": reasons,
         })
 

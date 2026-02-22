@@ -170,6 +170,10 @@ async def validate_plot(
             result["weather_actual"] = yield_result["weather_actual"]
             result["crop_ideal"] = yield_result["crop_ideal"]
             result["parameter_scores"] = yield_result["parameter_scores"]
+            result["is_unsuitable"] = yield_result.get("is_unsuitable", False)
+            result["has_critical_failure"] = yield_result.get("has_critical_failure", False)
+            result["yield_warning"] = yield_result.get("yield_warning", "")
+            result["unsuitability_reasons"] = yield_result.get("unsuitability_reasons", [])
 
             # Integrate into overall confidence
             result["confidence_score"] = integrate_yield_score(

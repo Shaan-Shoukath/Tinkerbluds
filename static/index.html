@@ -1822,28 +1822,56 @@
             });
             document.getElementById("comparisonRows").innerHTML = html;
 
-            // Unsuitability warning banner
+            // Unsuitability / critical-failure warning banner
             let unsuitBanner = document.getElementById("unsuitabilityBanner");
             if (!unsuitBanner) {
               unsuitBanner = document.createElement("div");
               unsuitBanner.id = "unsuitabilityBanner";
               document.getElementById("weatherComparison").after(unsuitBanner);
             }
-            if (
-              data.is_unsuitable &&
+
+            const showCritical =
+              data.has_critical_failure || data.is_unsuitable;
+            const hasReasons =
               data.unsuitability_reasons &&
-              data.unsuitability_reasons.length > 0
-            ) {
+              data.unsuitability_reasons.length > 0;
+
+            if (showCritical || hasReasons) {
+              // Pick styling based on severity
+              const isSevere = data.is_unsuitable; // overall < 40%
+              const bgColor = isSevere
+                ? "rgba(229,62,62,0.10)"
+                : "rgba(252,129,74,0.08)";
+              const borderColor = isSevere
+                ? "rgba(229,62,62,0.4)"
+                : "rgba(252,129,74,0.3)";
+              const headColor = isSevere ? "#fc5050" : "#fc8150";
+
+              // Headline text
+              const headline =
+                data.yield_warning ||
+                (isSevere
+                  ? `🚫 ${data.claimed_crop} is NOT RECOMMENDED for this region`
+                  : `⚠️ ${data.claimed_crop} will have POOR YIELD here`);
+
               let warnHtml = `
-                <div style="margin-top:1rem; background:rgba(252,129,74,0.08); border:1px solid rgba(252,129,74,0.3); border-radius:10px; padding:0.8rem;">
-                  <div style="font-size:0.75rem; font-weight:700; color:#fc8150; margin-bottom:0.5rem;">🚫 Not Recommended for This Region</div>`;
-              data.unsuitability_reasons.forEach((r) => {
-                warnHtml += `
-                  <div style="font-size:0.65rem; color:#e2e8f0; padding:0.25rem 0; display:flex; align-items:center; gap:0.4rem;">
-                    <span>${r.icon}</span>
-                    <span>${r.reason}</span>
+                <div style="margin-top:1rem; background:${bgColor}; border:1px solid ${borderColor}; border-radius:10px; padding:0.8rem 1rem;">
+                  <div style="font-size:0.8rem; font-weight:700; color:${headColor}; margin-bottom:0.4rem;">
+                    ${headline}
                   </div>`;
-              });
+
+              if (hasReasons) {
+                data.unsuitability_reasons.forEach((r) => {
+                  const reasonColor = r.score <= 0.05 ? "#fc5050" : "#fbb040";
+                  warnHtml += `
+                    <div style="font-size:0.68rem; color:#e2e8f0; padding:0.3rem 0; display:flex; align-items:center; gap:0.5rem; border-top:1px solid rgba(255,255,255,0.04);">
+                      <span style="font-size:0.85rem;">${r.icon}</span>
+                      <span style="flex:1;">${r.reason}</span>
+                      <span style="color:${reasonColor}; font-weight:700; font-size:0.65rem; min-width:2rem; text-align:right;">${(r.score * 100).toFixed(0)}%</span>
+                    </div>`;
+                });
+              }
+
               warnHtml += `</div>`;
               unsuitBanner.innerHTML = warnHtml;
               unsuitBanner.style.display = "block";
