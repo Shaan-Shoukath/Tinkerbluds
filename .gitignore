@@ -5,3 +5,5 @@ data
 __pycache__
 image.png
 plot.kml
+
+*.kml

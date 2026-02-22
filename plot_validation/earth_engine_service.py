@@ -109,6 +109,143 @@ def get_cropland_mask(region: ee.Geometry) -> ee.Image:
     return cropland
 
 
+# ──────────────────────────────────────────────────────────────
+# Sentinel-1 SAR (Radar) — penetrates clouds, detects crop structure
+# ──────────────────────────────────────────────────────────────
+
+def get_sentinel1_composite(
+    region: ee.Geometry,
+    start_year: int = 2024,
+    start_month: int = 1,
+    end_year: int = 2024,
+    end_month: int = 12,
+) -> ee.Image:
+    """
+    Build a median composite from Sentinel-1 GRD (Ground Range Detected).
+
+    Uses IW (Interferometric Wide) mode with VH + VV polarization.
+    Returns median composite clipped to region at 10m resolution.
+    """
+    start_date = f"{start_year}-{start_month:02d}-01"
+    if end_month == 12:
+        end_date = f"{end_year}-12-31"
+    else:
+        end_date = f"{end_year}-{end_month + 1:02d}-01"
+
+    collection = (
+        ee.ImageCollection("COPERNICUS/S1_GRD")
+        .filterBounds(region)
+        .filterDate(start_date, end_date)
+        .filter(ee.Filter.eq("instrumentMode", "IW"))
+        .filter(ee.Filter.listContains("transmitterReceiverPolarisation", "VH"))
+        .filter(ee.Filter.listContains("transmitterReceiverPolarisation", "VV"))
+        .select(["VH", "VV"])
+    )
+
+    count = collection.size().getInfo()
+    logger.info("Found %d Sentinel-1 images for %d-%02d to %d-%02d", count, start_year, start_month, end_year, end_month)
+
+    if count == 0:
+        logger.warning("No Sentinel-1 images found — SAR data will be unavailable")
+        return None
+
+    return collection.median().clip(region)
+
+
+def compute_sar_stats(region: ee.Geometry, s1_composite: ee.Image) -> dict:
+    """
+    Compute SAR statistics over the polygon using reduceRegion.
+
+    Returns ee.Dictionary entries (lazy — not yet fetched):
+        mean_vh_db:   mean VH backscatter (dB)
+        mean_vv_db:   mean VV backscatter (dB)
+        vh_vv_ratio:  VH/VV ratio (linear, higher = more likely crop)
+    """
+    if s1_composite is None:
+        return {}
+
+    # VH and VV are in dB; compute ratio in linear space
+    vh_linear = ee.Image(10).pow(s1_composite.select("VH").divide(10))
+    vv_linear = ee.Image(10).pow(s1_composite.select("VV").divide(10))
+    ratio = vh_linear.divide(vv_linear).rename("vh_vv_ratio")
+
+    stack = s1_composite.addBands(ratio)
+
+    result = stack.reduceRegion(
+        reducer=ee.Reducer.mean(),
+        geometry=region,
+        scale=10,
+        maxPixels=1e9,
+    )
+
+    return {
+        "mean_vh_db": result.get("VH"),
+        "mean_vv_db": result.get("VV"),
+        "vh_vv_ratio": result.get("vh_vv_ratio"),
+    }
+
+
+def compute_sar_crop_score(vh_vv_ratio: float, mean_vh_db: float) -> float:
+    """
+    Score how likely the radar signature indicates cropland (0.0–1.0).
+
+    Cropland: higher VH/VV ratio (> 0.5), VH > -12 dB (rough surface)
+    Forest:   lower VH/VV ratio (< 0.3), more uniform backscatter
+    Water:    very low VH (< -20 dB)
+    """
+    if vh_vv_ratio is None or mean_vh_db is None:
+        return 0.5  # neutral when no SAR data
+
+    score = 0.0
+
+    # VH/VV ratio component (0–0.6)
+    if vh_vv_ratio > 0.5:
+        score += 0.6
+    elif vh_vv_ratio > 0.3:
+        score += 0.3 + 0.3 * ((vh_vv_ratio - 0.3) / 0.2)
+    else:
+        score += max(0.0, vh_vv_ratio)
+
+    # VH intensity component (0–0.4)
+    if mean_vh_db > -12:
+        score += 0.4  # rough/vegetated surface
+    elif mean_vh_db > -18:
+        score += 0.2 + 0.2 * ((mean_vh_db + 18) / 6)
+    else:
+        score += max(0.0, 0.1 + 0.1 * ((mean_vh_db + 20) / 2))
+
+    return round(min(1.0, max(0.0, score)), 4)
+
+
+# ──────────────────────────────────────────────────────────────
+# Terrain statistics (SRTM DEM)
+# ──────────────────────────────────────────────────────────────
+
+def get_terrain_stats(region: ee.Geometry) -> dict:
+    """
+    Get elevation and slope from SRTM 30m DEM.
+    Returns ee.Dictionary entries (lazy):
+        elevation_m: mean elevation in meters
+        slope_deg:   mean slope in degrees
+    """
+    dem = ee.Image("USGS/SRTMGL1_003")
+    slope = ee.Terrain.slope(dem)
+
+    stack = dem.rename("elevation").addBands(slope.rename("slope"))
+
+    result = stack.reduceRegion(
+        reducer=ee.Reducer.mean(),
+        geometry=region,
+        scale=30,
+        maxPixels=1e9,
+    )
+
+    return {
+        "elevation_m": result.get("elevation"),
+        "slope_deg": result.get("slope"),
+    }
+
+
 def compute_cultivated_stats(
     region: ee.Geometry,
     start_year: int = 2024,
@@ -120,83 +257,86 @@ def compute_cultivated_stats(
 ) -> dict:
     """
     Full processing pipeline:
-      1. Sentinel-2 median composite
-      2. NDVI
-      3. WorldCover cropland mask
-      4. Cultivated = cropland AND (NDVI > 0.5)
-      5. Area statistics via reduceRegion
+      1. Sentinel-2 median composite → NDVI (mean + stddev)
+      2. Sentinel-1 GRD composite → SAR stats (VH, VV, VH/VV ratio)
+      3. SRTM DEM → elevation, slope
+      4. WorldCover cropland mask
+      5. Cultivated = cropland AND (NDVI > threshold)
+      6. Area statistics via reduceRegion (single batched getInfo)
 
-    Returns dict with area values in m² and mean NDVI.
+    Returns dict with area values in m², NDVI, SAR, and terrain stats.
     """
     init_ee()
 
-    # --- Step 1–3: composites and masks ---
+    # --- Optical: Sentinel-2 ---
     composite = get_sentinel2_composite(region, start_year, start_month, end_year, end_month, cloud_threshold)
     ndvi = compute_ndvi(composite)
     cropland_mask = get_cropland_mask(region)
 
-    # Active vegetation: NDVI > threshold (0.3 works well for Indian agriculture)
+    # --- SAR: Sentinel-1 ---
+    s1_composite = get_sentinel1_composite(region, start_year, start_month, end_year, end_month)
+    sar_stats = compute_sar_stats(region, s1_composite)
+
+    # --- Active vegetation mask (NDVI + SAR) ---
+    # This is a real-time health indicator, NOT the cultivated land gate.
+    # NDVI and SAR can both miss vegetation due to cloud contamination,
+    # limited imagery, or seasonal spectral dips.
     active_veg = ndvi.gt(ndvi_threshold).rename("active_vegetation")
 
-    # Cultivated = cropland AND active vegetation
-    cultivated = cropland_mask.And(active_veg).rename("cultivated")
+    # --- Cultivated = ESA WorldCover cropland (directly) ---
+    # ESA WorldCover v200 is a 10m ML classification trained on multi-year
+    # Sentinel-1 + Sentinel-2 temporal stacks.  It already incorporates
+    # SAR + optical + temporal NDVI in its training pipeline, so adding
+    # our own single-image threshold on top is redundant and fails on
+    # cloudy/limited imagery.  We trust the ESA classification for
+    # "cultivated land" and use active_veg as a separate health metric.
+    cultivated = cropland_mask.rename("cultivated")
 
-    # --- Step 4: area statistics ---
-    # ee.Image.pixelArea() gives the area of each pixel in m²
     pixel_area = ee.Image.pixelArea()
 
-    # Total plot area
+    # Area statistics (lazy)
     total_area = pixel_area.reduceRegion(
-        reducer=ee.Reducer.sum(),
-        geometry=region,
-        scale=10,
-        maxPixels=1e9,
+        reducer=ee.Reducer.sum(), geometry=region, scale=10, maxPixels=1e9,
     ).get("area")
 
-    # Cropland area (WorldCover class 40)
     cropland_area = pixel_area.updateMask(cropland_mask).reduceRegion(
-        reducer=ee.Reducer.sum(),
-        geometry=region,
-        scale=10,
-        maxPixels=1e9,
+        reducer=ee.Reducer.sum(), geometry=region, scale=10, maxPixels=1e9,
     ).get("area")
 
-    # Active vegetation area (NDVI > threshold)
     active_veg_area = pixel_area.updateMask(active_veg).reduceRegion(
-        reducer=ee.Reducer.sum(),
-        geometry=region,
-        scale=10,
-        maxPixels=1e9,
+        reducer=ee.Reducer.sum(), geometry=region, scale=10, maxPixels=1e9,
     ).get("area")
 
-    # Cultivated area (cropland ∩ active veg)
     cultivated_area = pixel_area.updateMask(cultivated).reduceRegion(
-        reducer=ee.Reducer.sum(),
-        geometry=region,
-        scale=10,
-        maxPixels=1e9,
+        reducer=ee.Reducer.sum(), geometry=region, scale=10, maxPixels=1e9,
     ).get("area")
 
-    # Mean NDVI inside the polygon
     mean_ndvi = ndvi.reduceRegion(
-        reducer=ee.Reducer.mean(),
-        geometry=region,
-        scale=10,
-        maxPixels=1e9,
+        reducer=ee.Reducer.mean(), geometry=region, scale=10, maxPixels=1e9,
     ).get("NDVI")
 
-    # --- Step 5: WorldCover per-class breakdown ---
+    # NDVI standard deviation (temporal variability — crops fluctuate, forests don't)
+    ndvi_collection = (
+        ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+        .filterBounds(region)
+        .filterDate(
+            f"{start_year}-{start_month:02d}-01",
+            f"{end_year}-12-31" if end_month == 12 else f"{end_year}-{end_month + 1:02d}-01",
+        )
+        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", cloud_threshold))
+        .map(lambda img: img.normalizedDifference(["B8", "B4"]).rename("NDVI"))
+    )
+    ndvi_stddev = ndvi_collection.reduce(ee.Reducer.stdDev()).rename("NDVI_stddev")
+    mean_ndvi_stddev = ndvi_stddev.reduceRegion(
+        reducer=ee.Reducer.mean(), geometry=region, scale=10, maxPixels=1e9,
+    ).get("NDVI_stddev")
+
+    # --- WorldCover per-class breakdown ---
     WORLDCOVER_CLASSES = {
-        10: "Trees",
-        20: "Shrubland",
-        30: "Grassland",
-        40: "Cropland",
-        50: "Built-up",
-        60: "Bare / Sparse Vegetation",
-        80: "Permanent Water",
-        90: "Herbaceous Wetland",
-        95: "Mangroves",
-        100: "Moss and Lichen",
+        10: "Trees", 20: "Shrubland", 30: "Grassland", 40: "Cropland",
+        50: "Built-up", 60: "Bare / Sparse Vegetation",
+        80: "Permanent Water", 90: "Herbaceous Wetland",
+        95: "Mangroves", 100: "Moss and Lichen",
     }
 
     worldcover_raw = ee.Image("ESA/WorldCover/v200/2021").clip(region)
@@ -204,31 +344,39 @@ def compute_cultivated_stats(
     for class_val, class_name in WORLDCOVER_CLASSES.items():
         mask = worldcover_raw.eq(class_val)
         class_areas[class_name] = pixel_area.updateMask(mask).reduceRegion(
-            reducer=ee.Reducer.sum(),
-            geometry=region,
-            scale=10,
-            maxPixels=1e9,
+            reducer=ee.Reducer.sum(), geometry=region, scale=10, maxPixels=1e9,
         ).get("area")
 
-    # --- Fetch all results from EE in one batch ---
+    # --- Terrain: SRTM ---
+    terrain_stats = get_terrain_stats(region)
+
+    # --- Single batched getInfo() call ---
     batch = {
         "total_area": total_area,
         "cropland_area": cropland_area,
         "active_veg_area": active_veg_area,
         "cultivated_area": cultivated_area,
         "mean_ndvi": mean_ndvi,
+        "ndvi_stddev": mean_ndvi_stddev,
     }
     batch.update({f"class_{name}": val for name, val in class_areas.items()})
+    batch.update(sar_stats)     # mean_vh_db, mean_vv_db, vh_vv_ratio
+    batch.update(terrain_stats)  # elevation_m, slope_deg
 
     results = ee.Dictionary(batch).getInfo()
-    logger.info("EE area stats: %s", results)
+    logger.info("EE stats (optical+SAR+terrain): %s", results)
 
-    # Build class breakdown (only include classes with > 0 area)
+    # Build class breakdown
     land_classes = {}
     for class_name in WORLDCOVER_CLASSES.values():
         area = results.get(f"class_{class_name}") or 0.0
         if area > 0:
             land_classes[class_name] = round(area, 2)
+
+    # SAR crop score
+    vh_vv = results.get("vh_vv_ratio")
+    vh_db = results.get("mean_vh_db")
+    sar_score = compute_sar_crop_score(vh_vv, vh_db)
 
     return {
         "plot_area_sq_m":              results.get("total_area") or 0.0,
@@ -236,7 +384,18 @@ def compute_cultivated_stats(
         "active_vegetation_area_sq_m": results.get("active_veg_area") or 0.0,
         "cultivated_area_sq_m":        results.get("cultivated_area") or 0.0,
         "mean_ndvi":                   results.get("mean_ndvi") or 0.0,
+        "ndvi_stddev":                 results.get("ndvi_stddev") or 0.0,
         "land_classes_sq_m":           land_classes,
+        # SAR
+        "mean_vh_db":                  round(vh_db, 2) if vh_db else None,
+        "mean_vv_db":                  round(results.get("mean_vv_db") or 0, 2) if results.get("mean_vv_db") else None,
+        "vh_vv_ratio":                 round(vh_vv, 4) if vh_vv else None,
+        "sar_crop_score":              sar_score,
+        # Terrain
+        "elevation_m":                 round(results.get("elevation_m") or 0, 1),
+        "slope_deg":                   round(results.get("slope_deg") or 0, 1),
+        # S1 composite reference for thumbnail
+        "_s1_composite":               s1_composite,
     }
 
 
@@ -309,8 +468,10 @@ def generate_thumbnails(
         red_channel, green_channel, blue_channel,
     ).rename(["vis-red", "vis-green", "vis-blue"])
 
-    # Where NDVI > threshold → gradient green; otherwise → dark greyscale
+    # NDVI-based vegetation highlight
     active_veg = ndvi.gt(ndvi_threshold)
+
+    # Where NDVI > threshold → gradient green; otherwise → dark greyscale
     highlighted = dark_base.where(active_veg, green_gradient).clip(region)
 
     mask_vis = {
@@ -342,6 +503,51 @@ def generate_thumbnails(
         "green_mask_b64": green_mask_b64,
         "green_area_sq_m": round(green_area_val, 2),
     }
+
+
+def generate_sar_thumbnail(
+    region: ee.Geometry,
+    s1_composite: ee.Image,
+    thumb_width: int = 512,
+) -> str:
+    """
+    Generate a SAR (Sentinel-1 VH) thumbnail with blue-orange gradient.
+
+    Blue = low backscatter (water/smooth), Orange = high (rough/vegetated).
+    Returns base64-encoded PNG string.
+    """
+    if s1_composite is None:
+        return ""
+
+    init_ee()
+
+    # VH band, typical range: -25 to -5 dB
+    vh = s1_composite.select("VH")
+
+    # Normalize to [0, 1] range
+    vh_norm = vh.subtract(-25).divide(20).clamp(0, 1)
+
+    # Blue-to-orange gradient
+    red_channel = vh_norm.multiply(255)
+    green_channel = vh_norm.multiply(140)
+    blue_channel = ee.Image.constant(255).subtract(vh_norm.multiply(255))
+
+    rgb = ee.Image.cat(
+        red_channel, green_channel, blue_channel,
+    ).rename(["vis-red", "vis-green", "vis-blue"]).clip(region)
+
+    vis = {
+        "bands": ["vis-red", "vis-green", "vis-blue"],
+        "min": 0,
+        "max": 255,
+        "dimensions": thumb_width,
+        "region": region,
+        "format": "png",
+    }
+    url = rgb.getThumbURL(vis)
+    logger.info("Fetching SAR thumbnail: %s", url)
+    response = http_requests.get(url, timeout=60)
+    return base64.b64encode(response.content).decode("utf-8")
 
 
 # ──────────────────────────────────────────────────────────────

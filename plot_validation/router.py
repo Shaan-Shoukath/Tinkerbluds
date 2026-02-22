@@ -83,13 +83,35 @@ async def validate_plot(
         )
 
     # ── 5. Run Earth Engine processing pipeline ──
+    # When a crop is specified, use its growing season for the S2 composite.
+    # This prevents dry-season images from dominating the NDVI composite.
+    ee_start_year, ee_start_month = start_year, start_month
+    ee_end_year, ee_end_month = end_year, end_month
+    ee_cloud = cloud_threshold
+
+    if claimed_crop.strip():
+        from plot_validation.yield_service import CROP_DATABASE
+        crop_key = claimed_crop.strip().lower()
+        crop_profile = CROP_DATABASE.get(crop_key)
+        if crop_profile and not (crop_profile.season_start == 1 and crop_profile.season_end == 12):
+            # Override date range to the crop's growing season
+            ee_start_month = crop_profile.season_start
+            ee_end_month = crop_profile.season_end
+            # In tropical monsoon regions, cloud cover is high during growing season
+            # so relax the threshold to capture more images
+            ee_cloud = max(cloud_threshold, 50)
+            logger.info(
+                "Crop season override for %s: months %d-%d, cloud<%d%%",
+                crop_profile.name, ee_start_month, ee_end_month, ee_cloud,
+            )
+
     try:
         logger.info(
             "Starting EE processing (%d-%02d to %d-%02d, cloud<%d%%)",
-            start_year, start_month, end_year, end_month, cloud_threshold,
+            ee_start_year, ee_start_month, ee_end_year, ee_end_month, ee_cloud,
         )
         area_stats = compute_cultivated_stats(
-            ee_region, start_year, start_month, end_year, end_month, cloud_threshold,
+            ee_region, ee_start_year, ee_start_month, ee_end_year, ee_end_month, ee_cloud,
         )
         logger.info("EE stats: %s", area_stats)
     except ValueError as e:
@@ -101,8 +123,17 @@ async def validate_plot(
             detail=f"Earth Engine processing failed: {e}",
         )
 
-    # ── 6. Stage-1 validation ──
-    validator = PlotValidatorStage1(area_stats)
+    # ── 6. Fetch weather early (needed for ML features) ──
+    weather_data = None
+    try:
+        centroid = polygon.centroid
+        from plot_validation.yield_service import fetch_weather_last_3_months
+        weather_data = fetch_weather_last_3_months(centroid.y, centroid.x)
+    except Exception as e:
+        logger.warning("Weather prefetch failed (non-fatal): %s", e)
+
+    # ── 7. Stage-1 validation (ML classifier) ──
+    validator = PlotValidatorStage1(area_stats, weather=weather_data)
     result = validator.validate()
 
     # Convert m² to acres for response
@@ -128,15 +159,24 @@ async def validate_plot(
         [c[1], c[0]] for c in polygon.exterior.coords
     ]
 
-    # ── 7. Generate satellite + green mask thumbnails ──
+    # ── 8. SAR + terrain stats ──
+    result["sar_crop_score"] = area_stats.get("sar_crop_score")
+    result["vh_vv_ratio"] = area_stats.get("vh_vv_ratio")
+    result["mean_vh_db"] = area_stats.get("mean_vh_db")
+    result["mean_vv_db"] = area_stats.get("mean_vv_db")
+    result["elevation_m"] = area_stats.get("elevation_m", 0.0)
+    result["slope_deg"] = area_stats.get("slope_deg", 0.0)
+    result["ndvi_stddev"] = area_stats.get("ndvi_stddev", 0.0)
+
+    # ── 9. Generate satellite + green mask + SAR thumbnails ──
     try:
         thumbs = generate_thumbnails(
             ee_region,
-            start_year=start_year,
-            start_month=start_month,
-            end_year=end_year,
-            end_month=end_month,
-            cloud_threshold=cloud_threshold,
+            start_year=ee_start_year,
+            start_month=ee_start_month,
+            end_year=ee_end_year,
+            end_month=ee_end_month,
+            cloud_threshold=ee_cloud,
         )
         result["satellite_thumbnail"] = thumbs["satellite_b64"]
         result["green_mask_thumbnail"] = thumbs["green_mask_b64"]
@@ -147,7 +187,19 @@ async def validate_plot(
         result["green_mask_thumbnail"] = ""
         result["green_area_acres"] = 0.0
 
-    # ── 8. Yield Feasibility (only if crop is claimed) ──
+    # SAR thumbnail (Sentinel-1 radar backscatter)
+    try:
+        from plot_validation.earth_engine_service import generate_sar_thumbnail
+        s1 = area_stats.get("_s1_composite")
+        if s1 is not None:
+            result["sar_thumbnail"] = generate_sar_thumbnail(ee_region, s1)
+        else:
+            result["sar_thumbnail"] = ""
+    except Exception as e:
+        logger.warning("SAR thumbnail failed (non-fatal): %s", e)
+        result["sar_thumbnail"] = ""
+
+    # ── 10. Yield Feasibility (only if crop is claimed) ──
     if claimed_crop.strip():
         try:
             centroid = polygon.centroid
@@ -160,6 +212,10 @@ async def validate_plot(
                 lat=centroid.y,
                 lon=centroid.x,
                 plot_area_hectares=plot_area_hectares,
+                start_year=start_year,
+                start_month=start_month,
+                end_year=end_year,
+                end_month=end_month,
             )
 
             result["claimed_crop"] = yield_result["claimed_crop"]
@@ -184,7 +240,7 @@ async def validate_plot(
         except Exception as e:
             logger.warning("Yield estimation failed (non-fatal): %s", e)
 
-    # ── 9. Crop Recommendations (always, independent of claimed_crop) ──
+    # ── 11. Crop Recommendations (always, independent of claimed_crop) ──
     try:
         centroid = polygon.centroid
         mean_ndvi = area_stats.get("mean_ndvi", 0.0)
@@ -198,7 +254,13 @@ async def validate_plot(
         logger.warning("Crop recommendation failed (non-fatal): %s", e)
         result["recommended_crops"] = []
 
-    logger.info("Validation result: decision=%s", result["decision"])
+    logger.info(
+        "Validation: decision=%s prob=%.4f using_ml=%s sar_score=%s",
+        result["decision"],
+        result.get("agricultural_probability", 0),
+        result.get("using_ml", False),
+        result.get("sar_crop_score"),
+    )
     return result
 
 

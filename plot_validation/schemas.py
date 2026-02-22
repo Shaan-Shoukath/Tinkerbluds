@@ -19,6 +19,20 @@ class ValidationResponse(BaseModel):
     satellite_thumbnail: str = ""
     green_mask_thumbnail: str = ""
     green_area_acres: float = 0.0
+    # SAR (Sentinel-1 radar)
+    sar_crop_score: Optional[float] = None
+    vh_vv_ratio: Optional[float] = None
+    mean_vh_db: Optional[float] = None
+    mean_vv_db: Optional[float] = None
+    sar_thumbnail: Optional[str] = ""
+    # ML classification
+    agricultural_probability: Optional[float] = None
+    ml_feature_importance: Optional[dict] = None
+    using_ml: bool = False
+    # Terrain
+    elevation_m: float = 0.0
+    slope_deg: float = 0.0
+    ndvi_stddev: float = 0.0
     # Yield feasibility
     claimed_crop: str = ""
     estimated_yield_ton_per_hectare: float = 0.0

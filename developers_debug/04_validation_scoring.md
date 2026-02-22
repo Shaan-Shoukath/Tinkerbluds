@@ -1,172 +1,205 @@
 # Validation & Scoring Logic
 
-How we turn raw area numbers into a PASS/REVIEW decision.
+How we turn raw satellite features into a PASS/REVIEW/FAIL decision.
 
-**File:** `plot_validation/validation_logic.py`
+**Files:** `plot_validation/validation_logic.py`, `plot_validation/ml_classifier.py`
 
 ---
 
 ## Data Flow
 
 ```
-EE Stats (m²)
+Earth Engine Stats
     │
-    ▼
-PlotValidatorStage1
-    ├── cultivated_pct = cultivated_area / plot_area
-    ├── confidence = 0.7 × cultivated_pct + 0.3 × mean_ndvi
-    └── decision = "PASS" if cultivated_pct > 0.6 else "REVIEW"
-    │
-    ▼
-Result dict (m²) → router converts to acres
+    ├── NDVI mean + stddev
+    ├── SAR VH, VV, VH/VV ratio
+    ├── Elevation, slope
+    └── WorldCover class areas
+         │
+         ▼
+  extract_features() → 8-feature vector
+         │
+         ▼
+  ┌──────────────────────────────────────┐
+  │  ML Model Trained?                   │
+  │   YES → XGBoost prediction           │
+  │   NO  → Fused optical+SAR fallback   │
+  └──────────────────────────────────────┘
+         │
+         ▼
+  agricultural_probability (0.0 → 1.0)
+         │
+    > 0.7 → PASS
+    0.4–0.7 → REVIEW
+    < 0.4 → FAIL
 ```
 
 ---
 
-## Class: `PlotValidatorStage1`
+## ML Classifier: `ml_classifier.py`
+
+### The 8 Features
+
+| #   | Feature         | Source                | Why It Matters                                                   |
+| --- | --------------- | --------------------- | ---------------------------------------------------------------- |
+| 1   | `ndvi_mean`     | Sentinel-2            | How green the land is                                            |
+| 2   | `ndvi_stddev`   | Sentinel-2 (temporal) | **Crops fluctuate seasonally, forests don't** (71.6% importance) |
+| 3   | `vh_mean_db`    | Sentinel-1 SAR        | Radar backscatter intensity                                      |
+| 4   | `vh_vv_ratio`   | Sentinel-1 SAR        | Distinguishes crop canopy from forests/urban                     |
+| 5   | `elevation_m`   | SRTM DEM              | High elevation = less likely farmland                            |
+| 6   | `slope_deg`     | SRTM DEM              | Steep slopes = hard to farm                                      |
+| 7   | `rainfall_mm`   | Open-Meteo            | Too dry = less viable                                            |
+| 8   | `soil_moisture` | Open-Meteo            | Active farming needs adequate moisture                           |
+
+### Feature Extraction
+
+```python
+def extract_features(area_stats: dict, weather: dict = None) -> dict:
+    return {
+        "ndvi_mean":     area_stats.get("mean_ndvi", 0.0),
+        "ndvi_stddev":   area_stats.get("ndvi_stddev", 0.0),
+        "vh_mean_db":    area_stats.get("mean_vh_db"),
+        "vh_vv_ratio":   area_stats.get("vh_vv_ratio"),
+        "elevation_m":   area_stats.get("elevation_m", 0.0),
+        "slope_deg":     area_stats.get("slope_deg", 0.0),
+        "rainfall_mm":   weather.get("total_rainfall_mm", 0.0) if weather else 0.0,
+        "soil_moisture": weather.get("avg_soil_moisture", 0.0) if weather else 0.0,
+    }
+```
+
+### XGBoost Model
+
+The model is an XGBoost gradient-boosted decision tree classifier, stored as `data/crop_classifier.json`.
+
+**Why XGBoost?**
+
+- Best-in-class for tabular data (8 columns)
+- Handles missing features natively (if SAR is unavailable)
+- Provides feature importance (explains decisions)
+- ~1ms inference, no GPU, ~50KB model file
+
+**Training:** `python scripts/train_classifier.py --samples 500`
+
+Uses synthetic but science-backed bootstrap data (cropland/forest/urban/water distribution). Retrain with real user-confirmed plots for improved accuracy.
+
+### Fused Threshold Fallback
+
+When no trained model exists (`data/crop_classifier.json` missing), the system uses a rule-based fusion:
+
+```
+optical_score = 0.7 × cultivated_pct + 0.3 × max(0, mean_ndvi)
+fused_score   = 0.7 × optical_score  + 0.3 × sar_crop_score
+
+→ fused_score becomes the agricultural_probability
+```
+
+| Weight          | Component      | What It Measures                        |
+| --------------- | -------------- | --------------------------------------- |
+| 49% (0.7 × 0.7) | Cultivated %   | How much of the plot is active farmland |
+| 21% (0.7 × 0.3) | Mean NDVI      | Vegetation health                       |
+| 30%             | SAR crop score | Radar-based crop structure              |
+
+---
+
+## Validator: PlotValidatorStage1
 
 ```python
 class PlotValidatorStage1:
-    def __init__(self, stats: dict):
+    def __init__(self, stats: dict, weather: dict = None):
         self.stats = stats
+        self.weather = weather
 
     def validate(self) -> dict:
-        plot_area = self.stats["plot_area_sq_m"]
-        cultivated_area = self.stats["cultivated_area_sq_m"]
-        mean_ndvi = self.stats["mean_ndvi"]
-
-        cultivated_pct = cultivated_area / plot_area
-        confidence_score = 0.7 * cultivated_pct + 0.3 * max(0.0, mean_ndvi)
-
-        decision = "PASS" if cultivated_pct > 0.6 else "REVIEW"
+        features = extract_features(self.stats, self.weather)
+        ml_result = classifier.predict(features, area_stats=self.stats)
 
         return {
-            "plot_area_sq_m": plot_area,
-            "cropland_area_sq_m": self.stats["cropland_area_sq_m"],
-            "active_vegetation_area_sq_m": self.stats["active_vegetation_area_sq_m"],
-            "cultivated_percentage": round(cultivated_pct * 100, 2),
-            "decision": decision,
-            "confidence_score": round(confidence_score, 4),
+            "decision":                 ml_result.decision,
+            "confidence_score":         ml_result.agricultural_probability,
+            "agricultural_probability": ml_result.agricultural_probability,
+            "ml_feature_importance":    ml_result.feature_importance,
+            "using_ml":                 ml_result.using_ml,
+            # ... plus area stats
         }
 ```
 
----
-
-## Scoring Formula Explained
-
-### Cultivated Percentage
-
-```
-cultivated_pct = cultivated_area / plot_area
-```
-
-- `cultivated_area` = pixels where (WorldCover == Cropland) AND (NDVI > 0.3)
-- `plot_area` = total polygon area
-- Expressed as 0–100% in the response
-
-### Confidence Score
-
-```
-confidence = 0.7 × cultivated_pct + 0.3 × mean_ndvi
-```
-
-| Component    | Weight    | Range   | Reasoning                                               |
-| ------------ | --------- | ------- | ------------------------------------------------------- |
-| Cultivated % | 0.7 (70%) | 0.0–1.0 | Primary signal: how much of the plot is actively farmed |
-| Mean NDVI    | 0.3 (30%) | 0.0–1.0 | Secondary signal: how healthy the vegetation is         |
-
-**Why this weighting?**
-
-- Coverage matters more than health. A plot where 80% is farmed but crops are slightly stressed is more clearly "cultivated" than a plot with 10% farmed but very healthy crops.
-- Mean NDVI adds nuance: two plots with 65% cultivation but different vegetation health should score differently.
-- `max(0.0, mean_ndvi)` clamps negative NDVI (water bodies) to zero.
-
 ### Decision Thresholds
 
-| Cultivated % | Decision   | Reasoning                                                  |
-| ------------ | ---------- | ---------------------------------------------------------- |
-| > 60%        | **PASS**   | More than half the plot is confirmed active farmland       |
-| ≤ 60%        | **REVIEW** | Could be forest, fallow, mixed-use, or partial cultivation |
-
-**Why 60%?**
-
-- Not 50% because small patches of cropland inside a forest shouldn't pass
-- Not 80% because many farms have paths, buildings, ponds taking up ~20-30%
-- 60% gives a balanced threshold
+| Probability | Decision   | Reasoning                             | Can Save to Supabase? |
+| ----------- | ---------- | ------------------------------------- | --------------------- |
+| > 0.7       | **PASS**   | High confidence of active farmland    | ✅ Yes                |
+| 0.4 – 0.7   | **REVIEW** | Mixed signals — may need human review | ✅ Yes                |
+| < 0.4       | **FAIL**   | Unlikely to be agricultural land      | ❌ Blocked            |
 
 ---
 
 ## Example Calculations
 
-### Case 1: Active Paddy Field (Palakkad)
+### Case 1: Active Paddy Field (Palakkad) — Fused Fallback
 
 ```
-Plot area:       22,000 m²
-Cropland:        18,000 m²  (WorldCover says it's farmland)
-Active veg:      16,000 m²  (NDVI > 0.3)
-Cultivated:      15,000 m²  (intersection)
-Mean NDVI:       0.45
+NDVI mean:        0.55
+Cultivated %:     68.2%
+SAR crop score:   0.75
 
-cultivated_pct = 15000 / 22000 = 0.682 → 68.2%
-confidence     = 0.7 × 0.682 + 0.3 × 0.45 = 0.612
-decision       = PASS  (68.2% > 60%)
+optical_score = 0.7 × 0.682 + 0.3 × 0.55 = 0.642
+fused_score   = 0.7 × 0.642 + 0.3 × 0.75 = 0.674
+
+Decision: REVIEW (0.674 < 0.7)
 ```
 
-### Case 2: Forest Plot (Western Ghats)
+### Case 2: Dense Forest (Western Ghats) — Fused Fallback
 
 ```
-Plot area:       22,428 m²
-Cropland:        0 m²       (WorldCover says Trees, not Cropland)
-Active veg:      17,150 m²  (forest is green, NDVI > 0.3)
-Cultivated:      0 m²       (0 AND 17150 = 0)
-Mean NDVI:       0.376
+NDVI mean:        0.72  (forest is very green)
+Cultivated %:     0%    (WorldCover = Trees, not Cropland)
+SAR crop score:   0.25  (low VH/VV ratio = forest canopy)
 
-cultivated_pct = 0 / 22428 = 0.0 → 0.0%
-confidence     = 0.7 × 0.0 + 0.3 × 0.376 = 0.113
-decision       = REVIEW  (0% ≤ 60%)
+optical_score = 0.7 × 0.0 + 0.3 × 0.72 = 0.216
+fused_score   = 0.7 × 0.216 + 0.3 × 0.25 = 0.226
+
+Decision: FAIL (0.226 < 0.4)
 ```
+
+Note: Without SAR, the forest's high NDVI (0.72) would have inflated the score. SAR's low VH/VV ratio correctly pulls it down.
+
+### Case 3: ML Model Active
+
+When the XGBoost model is trained, `using_ml = True`:
+
+```
+Features: [0.55, 0.18, -12.0, 0.45, 150, 3.5, 450, 0.32]
+
+XGBoost prediction: 0.89 probability (cropland)
+Feature importance: { ndvi_stddev: 71.6%, vh_vv_ratio: 14.5%, ... }
+
+Decision: PASS (0.89 > 0.7)
+```
+
+The ML model uses all 8 features holistically, especially leveraging NDVI temporal variability which the threshold fallback cannot.
 
 ---
 
 ## Unit Conversion (in `router.py`)
 
-The EE pipeline returns everything in **square metres**. The router converts to **acres** before responding:
+EE returns everything in **square metres**. Router converts to **acres**:
 
 ```python
-SQ_M_PER_ACRE = 4046.8564224
-
+SQ_M_PER_ACRE = 4046.8564224  # International Yard and Pound Agreement (1959)
 result["plot_area_acres"] = round(result.pop("plot_area_sq_m") / SQ_M_PER_ACRE, 4)
 ```
-
-The conversion constant `4046.8564224` is the exact value defined by the International Yard and Pound Agreement (1959).
-
----
-
-## Dominant Class Detection (in `router.py`)
-
-```python
-raw_classes = area_stats.get("land_classes_sq_m", {})
-result["dominant_class"] = max(raw_classes, key=raw_classes.get)
-```
-
-Python's `max()` with `key=dict.get` finds the class name with the largest area value. This tells the user what the land primarily is (e.g. "Trees", "Cropland").
 
 ---
 
 ## Yield Feasibility Integration (in `router.py`)
 
-When `claimed_crop` is provided, the yield score is integrated into the overall confidence:
+When `claimed_crop` is provided, yield score integrates into confidence:
 
 ```python
 def integrate_yield_score(base_confidence, yield_feasibility_score):
     """Combined score = 60% land validation + 40% crop feasibility"""
     return round(0.6 * base_confidence + 0.4 * yield_feasibility_score, 4)
 ```
-
-| Source            | Weight | What it measures                 |
-| ----------------- | ------ | -------------------------------- |
-| Land validation   | 60%    | Is this actually cultivated land |
-| Yield feasibility | 40%    | Can the claimed crop grow here   |
 
 ### Yield Parameter Weights
 

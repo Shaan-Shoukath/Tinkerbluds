@@ -707,13 +707,16 @@
         <ul class="step-list" id="stepList">
           <li><span class="dot"></span> Parsing KML geometry</li>
           <li><span class="dot"></span> Validating polygon boundaries</li>
+          <li><span class="dot"></span> Fetching Sentinel-2 optical imagery</li>
           <li>
-            <span class="dot"></span> Fetching Sentinel-2 imagery from Earth
-            Engine
+            <span class="dot"></span> Fetching Sentinel-1 radar (SAR) data
           </li>
-          <li><span class="dot"></span> Computing NDVI vegetation index</li>
-          <li><span class="dot"></span> Analysing ESA WorldCover cropland</li>
-          <li><span class="dot"></span> Calculating area statistics</li>
+          <li><span class="dot"></span> Computing NDVI + SAR statistics</li>
+          <li>
+            <span class="dot"></span> Analysing terrain & WorldCover classes
+          </li>
+          <li><span class="dot"></span> Running ML crop classifier</li>
+          <li><span class="dot"></span> Generating thumbnails</li>
         </ul>
       </div>
 
@@ -788,7 +791,9 @@
               "
             ></div>
           </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem">
+          <div
+            style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem"
+          >
             <div>
               <div
                 style="
@@ -819,7 +824,7 @@
                   text-align: center;
                 "
               >
-                Green Vegetation Mask
+                NDVI Green Mask
               </div>
               <img
                 id="greenMaskImg"
@@ -829,6 +834,27 @@
                   border: 1px solid rgba(104, 211, 145, 0.2);
                 "
                 alt="Green mask"
+              />
+            </div>
+            <div id="sarThumbDiv" style="display: none">
+              <div
+                style="
+                  font-size: 0.7rem;
+                  color: #f6ad55;
+                  margin-bottom: 0.4rem;
+                  text-align: center;
+                "
+              >
+                SAR Radar (S1)
+              </div>
+              <img
+                id="sarImg"
+                style="
+                  width: 100%;
+                  border-radius: 8px;
+                  border: 1px solid rgba(246, 173, 85, 0.2);
+                "
+                alt="SAR radar view"
               />
             </div>
           </div>
@@ -859,29 +885,117 @@
             <div class="value" id="cropArea">—</div>
           </div>
           <div class="stat-card">
-            <div class="label">Active Vegetation (NDVI)</div>
+            <div class="label">Active Vegetation</div>
             <div class="desc">
-              Land with healthy green growth detected via Sentinel-2
-              near-infrared (NDVI &gt; 0.3)
+              Land with active crop cover detected via Sentinel-2 NDVI and
+              Sentinel-1 SAR radar backscatter
             </div>
             <div class="value" id="vegArea">—</div>
           </div>
           <div class="stat-card">
             <div class="label">Cultivated Land</div>
             <div class="desc">
-              Overlap of ESA Cropland + Active Vegetation = confirmed active
-              farming
+              ESA WorldCover ML-classified farmland — trained on multi-year
+              Sentinel-1 &amp; Sentinel-2 data
             </div>
             <div class="value" id="cultPct">—</div>
           </div>
         </div>
 
         <div class="confidence-track">
-          <div class="label">Confidence Score</div>
+          <div
+            style="
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              margin-bottom: 0.4rem;
+            "
+          >
+            <div class="label">Confidence Score</div>
+            <div
+              id="mlBadge"
+              style="
+                display: none;
+                padding: 0.25rem 0.7rem;
+                border-radius: 20px;
+                font-size: 0.7rem;
+                font-weight: 600;
+              "
+            ></div>
+          </div>
           <div class="conf-bar-bg">
             <div class="conf-bar" id="confBar" style="width: 0%"></div>
           </div>
           <div class="conf-value" id="confValue">—</div>
+        </div>
+
+        <!-- SAR Stats -->
+        <div id="sarStatsSection" style="display: none; margin-top: 1rem">
+          <div
+            style="
+              background: rgba(246, 173, 85, 0.06);
+              border: 1px solid rgba(246, 173, 85, 0.15);
+              border-radius: 10px;
+              padding: 0.8rem 1rem;
+            "
+          >
+            <div
+              style="
+                font-size: 0.72rem;
+                color: #f6ad55;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                margin-bottom: 0.6rem;
+              "
+            >
+              🛰️ SAR Radar Analysis (Sentinel-1)
+            </div>
+            <div
+              style="
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 0.8rem;
+                text-align: center;
+              "
+            >
+              <div>
+                <div style="font-size: 0.6rem; color: #718096">SAR Score</div>
+                <div
+                  id="sarScore"
+                  style="font-size: 1.1rem; font-weight: 700; color: #f6ad55"
+                >
+                  —
+                </div>
+              </div>
+              <div>
+                <div style="font-size: 0.6rem; color: #718096">VH/VV Ratio</div>
+                <div
+                  id="vhvvRatio"
+                  style="font-size: 1.1rem; font-weight: 700; color: #e2e8f0"
+                >
+                  —
+                </div>
+              </div>
+              <div>
+                <div style="font-size: 0.6rem; color: #718096">Elevation</div>
+                <div
+                  id="elevationVal"
+                  style="font-size: 1.1rem; font-weight: 700; color: #e2e8f0"
+                >
+                  —
+                </div>
+              </div>
+              <div>
+                <div style="font-size: 0.6rem; color: #718096">Slope</div>
+                <div
+                  id="slopeVal"
+                  style="font-size: 1.1rem; font-weight: 700; color: #e2e8f0"
+                >
+                  —
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Land Class Breakdown -->
@@ -1020,7 +1134,8 @@
                 margin-bottom: 0.4rem;
               "
             >
-              Actual vs Ideal Conditions (Last 90 Days)
+              Actual vs Ideal Conditions
+              <span id="weatherPeriodLabel">(Growing Season)</span>
             </div>
             <div
               id="weatherPeriod"
@@ -1114,8 +1229,9 @@
               font-style: italic;
             "
           >
-            Based on weather data from the last 90 days. Scores use temperature,
-            rainfall, humidity, and vegetation health.
+            Based on weather data from the crop's growing season. Scores use
+            temperature, rainfall, humidity, soil moisture, and vegetation
+            health.
           </div>
         </div>
       </div>
@@ -1712,7 +1828,7 @@
           mapInstance.fitBounds(poly.getBounds().pad(0.3));
         }
 
-        // Satellite + Green mask preview
+        // Satellite + Green mask + SAR preview
         if (data.satellite_thumbnail && data.green_mask_thumbnail) {
           document.getElementById("previewSection").style.display = "block";
           document.getElementById("satelliteImg").src =
@@ -1721,8 +1837,47 @@
             "data:image/png;base64," + data.green_mask_thumbnail;
           document.getElementById("greenAreaBadge").textContent =
             "🌿 Green Area: " + data.green_area_acres.toFixed(2) + " acres";
+          // SAR thumbnail
+          if (data.sar_thumbnail) {
+            document.getElementById("sarThumbDiv").style.display = "block";
+            document.getElementById("sarImg").src =
+              "data:image/png;base64," + data.sar_thumbnail;
+          } else {
+            document.getElementById("sarThumbDiv").style.display = "none";
+          }
         } else {
           document.getElementById("previewSection").style.display = "none";
+        }
+
+        // ML Classification badge
+        const mlBadge = document.getElementById("mlBadge");
+        if (data.agricultural_probability != null) {
+          const prob = (data.agricultural_probability * 100).toFixed(0);
+          if (data.using_ml) {
+            mlBadge.textContent = "🤖 ML: " + prob + "% agricultural";
+            mlBadge.style.background = "rgba(99,179,237,0.15)";
+            mlBadge.style.color = "#63b3ed";
+          } else {
+            mlBadge.textContent = "📊 Fused: " + prob + "% agricultural";
+            mlBadge.style.background = "rgba(246,173,85,0.12)";
+            mlBadge.style.color = "#f6ad55";
+          }
+          mlBadge.style.display = "inline-block";
+        }
+
+        // SAR stats section
+        if (data.sar_crop_score != null) {
+          document.getElementById("sarStatsSection").style.display = "block";
+          document.getElementById("sarScore").textContent =
+            (data.sar_crop_score * 100).toFixed(0) + "%";
+          document.getElementById("vhvvRatio").textContent =
+            data.vh_vv_ratio != null ? data.vh_vv_ratio.toFixed(3) : "N/A";
+          document.getElementById("elevationVal").textContent =
+            (data.elevation_m || 0).toFixed(0) + " m";
+          document.getElementById("slopeVal").textContent =
+            (data.slope_deg || 0).toFixed(1) + "°";
+        } else {
+          document.getElementById("sarStatsSection").style.display = "none";
         }
 
         // Yield Feasibility
@@ -1760,6 +1915,32 @@
               " (" +
               (data.weather_actual.days_sampled || 0) +
               " days)";
+
+            // Update header to show season months if available
+            const seasonLabel = document.getElementById("weatherPeriodLabel");
+            if (data.weather_actual.season_months) {
+              const monthNames = [
+                "",
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec",
+              ];
+              const parts = data.weather_actual.season_months.split("-");
+              const startM = monthNames[parseInt(parts[0])] || parts[0];
+              const endM = monthNames[parseInt(parts[1])] || parts[1];
+              seasonLabel.textContent = `(${startM}–${endM} Season)`;
+            } else {
+              seasonLabel.textContent = "(Last 90 Days)";
+            }
 
             const rows = [
               {

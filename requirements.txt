@@ -8,3 +8,5 @@ earthengine-api
 pydantic
 python-multipart
 supabase
+xgboost
+scikit-learn

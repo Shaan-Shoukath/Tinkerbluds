@@ -9,53 +9,47 @@ The core satellite data pipeline — all processing runs on Google's servers.
 ## Data Flow
 
 ```
-init_ee()
-    │
-    ▼
-get_sentinel2_composite()         get_cropland_mask()
-    │                                    │
-    ▼                                    ▼
-compute_ndvi()               WorldCover == 40
-    │                                    │
-    ▼                                    │
-NDVI > 0.3 (active_veg)                 │
-    │                                    │
-    └──────────┬─────────────────────────┘
-               ▼
-        cultivated = active_veg AND cropland
-               │
-               ▼
-        reduceRegion (area stats)
-               │
-               ▼
-        per-class breakdown
-               │
-               ▼
-        .getInfo()  ← single network call
+Optical (Sentinel-2)              SAR (Sentinel-1)              Terrain (SRTM)
+    │                                    │                          │
+get_sentinel2_composite()      get_sentinel1_composite()     get_terrain_stats()
+    │                                    │                          │
+compute_ndvi()                 compute_sar_stats()                  │
+    │                           VH, VV, VH/VV ratio                 │
+    ▼                                    │                          │
+NDVI > 0.3 (active_veg)                 │                          │
+    │                                    │                          │
+    ├── get_cropland_mask()              │                          │
+    │   WorldCover == 40                 │                          │
+    │                                    │                          │
+    └──── cultivated = cropland AND veg  │                          │
+               │                         │                          │
+               ▼                         ▼                          ▼
+         ┌─────────────────────────────────────────────────────────────┐
+         │         ee.Dictionary(batch).getInfo()                     │
+         │         SINGLE batched network call for ALL features       │
+         └─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Functions
+## Why We Use Three Data Sources
 
-### `init_ee()`
+NDVI alone can't distinguish farms from forests (both are green). Adding SAR radar and terrain data solves this:
 
-```python
-def init_ee():
-    project = os.getenv("EE_PROJECT_ID")
-    ee.Initialize(
-        credentials=ee.ServiceAccountCredentials(...) or default,
-        project=project,
-    )
-```
-
-Authenticates with Google Cloud. Uses Application Default Credentials (from `earthengine authenticate`). Called once at server startup.
+| Scenario           | NDVI alone    | + WorldCover            | + SAR Radar        | + Terrain | Correct?    |
+| ------------------ | ------------- | ----------------------- | ------------------ | --------- | ----------- |
+| Active paddy field | ✅ Green      | ✅ Cropland             | ✅ High VH/VV      | ✅ Flat   | ✅          |
+| Dense forest       | ❌ Also green | ✅ Trees (not cropland) | ✅ Low VH/VV       | ✅ Sloped | ✅          |
+| Fallow farmland    | ❌ Low NDVI   | ✅ Cropland             | ⚠️ Moderate        | ✅ Flat   | ✅ (REVIEW) |
+| Construction site  | ✅ Low        | ✅ Built-up             | ✅ Very high VH/VV | -         | ✅          |
 
 ---
+
+## Optical: Sentinel-2 (NDVI)
 
 ### `get_sentinel2_composite(region, year, start_month, end_month, cloud_threshold)`
 
-**What it does:** Creates a cloud-free median composite from the Sentinel-2 satellite constellation.
+Creates a cloud-free median composite from Sentinel-2 optical imagery.
 
 ```python
 collection = (
@@ -65,118 +59,219 @@ collection = (
     .filter(ee.Filter.lt(          # ③ reject cloudy scenes
         "CLOUDY_PIXEL_PERCENTAGE", cloud_threshold
     ))
-    .select(["B2", "B3", "B4", "B8"])  # ④ only the bands we need
+    .select(["B2", "B3", "B4", "B8"])  # ④ only RGB + NIR bands
 )
-composite = collection.median()    # ⑤ pixel-wise median
+composite = collection.median()    # ⑤ pixel-wise median removes clouds
 ```
 
-**Step-by-step reasoning:**
-
-| Step           | What               | Why                                                                           |
-| -------------- | ------------------ | ----------------------------------------------------------------------------- |
-| ① filterBounds | Spatial filter     | Sentinel-2 has 290km-wide tiles. Filter to only tiles overlapping our polygon |
-| ② filterDate   | Temporal filter    | Limit to the user's chosen month range                                        |
-| ③ cloud filter | Quality filter     | `CLOUDY_PIXEL_PERCENTAGE` is metadata attached to each scene by ESA           |
-| ④ select       | Band filter        | We only need RGB + NIR. Dropping other bands reduces memory                   |
-| ⑤ median       | Temporal composite | Merges all qualifying images into one clean image                             |
-
-**Why median compositing?**
-
-If Sentinel-2 captured 20 images of your plot over a year, some will have clouds. The median of each pixel across all images naturally picks the cloud-free value, because clouds (bright white) are outliers that the median ignores.
-
-```
-Image 1 pixel: 2500  (clear)
-Image 2 pixel: 9000  (cloud - very bright)
-Image 3 pixel: 2800  (clear)
-Median = 2800 ← cloud automatically excluded
-```
-
----
+**Why median compositing?** If 20 images were captured, some will have clouds. The median of each pixel naturally picks the cloud-free value because clouds (very bright) are outliers.
 
 ### `compute_ndvi(composite)`
 
-```python
-def compute_ndvi(composite):
-    ndvi = composite.normalizedDifference(["B8", "B4"]).rename("NDVI")
-    return ndvi
+```
+NDVI = (NIR - Red) / (NIR + Red) = (B8 - B4) / (B8 + B4)
 ```
 
-**Formula:** `NDVI = (NIR - Red) / (NIR + Red) = (B8 - B4) / (B8 + B4)`
+| Surface      | NDVI      | Interpretation              |
+| ------------ | --------- | --------------------------- |
+| Dense crops  | **0.71**  | Healthy active farming      |
+| Sparse crops | **0.33**  | Growing but not peak season |
+| Bare soil    | **0.09**  | No vegetation               |
+| Water        | **-0.60** | Not land                    |
 
-**The science:** Chlorophyll in leaves absorbs red light (for photosynthesis) but strongly reflects near-infrared. So healthy vegetation has: high NIR, low Red → high NDVI.
-
-| Surface      | B8 (NIR) | B4 (Red) | NDVI      | Interpretation              |
-| ------------ | -------- | -------- | --------- | --------------------------- |
-| Dense crops  | 3000     | 500      | **0.71**  | Healthy active farming      |
-| Sparse crops | 2000     | 1000     | **0.33**  | Growing but not peak season |
-| Bare soil    | 1200     | 1000     | **0.09**  | No vegetation               |
-| Water        | 100      | 400      | **-0.60** | Not land                    |
-| Clouds       | 8000     | 8000     | **0.00**  | Bright in both bands        |
-
-**NDVI threshold (0.3):**
-
-- Textbook threshold is 0.5, but that's for peak-season temperate agriculture
-- Indian crops (especially paddy after harvest or between seasons) have median NDVI of 0.3–0.4
-- 0.3 captures active cropland while excluding bare soil (< 0.1) and water (< 0)
+**NDVI threshold (0.3):** Indian crops (especially paddy between seasons) have median NDVI of 0.3–0.4. This captures active cropland while excluding bare soil and water.
 
 ---
+
+## SAR Radar: Sentinel-1
+
+### What is SAR?
+
+**Synthetic Aperture Radar** is an active sensor — the satellite sends out microwave pulses and measures the reflected signal. Unlike optical imagery (cameras), SAR:
+
+- ☁️ **Works through clouds** — microwaves penetrate cloud cover completely
+- 🌙 **Works at night** — doesn't need sunlight (active illumination)
+- 🌿 **Senses canopy structure** — different vegetation types scatter radar differently
+
+### How the Data is Used
+
+**Sentinel-1** is a C-band SAR satellite (5.4 GHz) that captures images in two polarizations:
+
+| Polarization             | Name                                  | What It Measures                        | Typical Range |
+| ------------------------ | ------------------------------------- | --------------------------------------- | ------------- |
+| **VH** (cross-polarized) | Vertical transmit, Horizontal receive | Volume scattering in vegetation canopy  | -20 to -8 dB  |
+| **VV** (co-polarized)    | Vertical transmit, Vertical receive   | Surface scattering (bare ground, water) | -15 to -5 dB  |
+
+**The VH/VV ratio** is the key discriminator:
+
+| Surface             | VH (dB) | VV (dB) | VH/VV Ratio   | Why                                         |
+| ------------------- | ------- | ------- | ------------- | ------------------------------------------- |
+| Crops (paddy/wheat) | -12     | -7      | **0.4–0.65**  | Crop rows create moderate volume scattering |
+| Dense forest        | -10     | -6      | **0.15–0.35** | Tree trunks cause strong co-pol reflections |
+| Urban/concrete      | -5      | -3      | **0.7–0.9**   | Hard corners cause strong multi-bounce      |
+| Water               | -25     | -20     | **0.1–0.2**   | Smooth surface reflects away from satellite |
+
+### Why SAR for Crop Detection?
+
+The fundamental problem: **forests and farms both look green to optical satellites** (both have high NDVI). SAR solves this because:
+
+1. **Crop canopy structure** — row crops (rice, wheat) have a distinct scattering pattern (moderate VH, moderate VH/VV ~0.5) that's different from random forest canopy or smooth urban surfaces
+2. **Temporal consistency** — SAR data is available regardless of cloud cover, solving the tropical India problem where monsoon clouds block Sentinel-2 for months
+3. **Penetration depth** — C-band SAR partially penetrates crop canopy, revealing the soil-vegetation interface that optical can't see
+
+### `get_sentinel1_composite(region, start_year, start_month, end_year, end_month)`
+
+```python
+collection = (
+    ee.ImageCollection("COPERNICUS/S1_GRD")
+    .filterBounds(region)
+    .filterDate(start, end)
+    .filter(ee.Filter.listContains("transmitterReceiverPolarisation", "VH"))
+    .filter(ee.Filter.eq("instrumentMode", "IW"))  # Interferometric Wide swath
+    .select(["VH", "VV"])
+)
+composite = collection.median()
+```
+
+**S1_GRD** = Sentinel-1 Ground Range Detected (backscatter intensity in dB). **IW** mode = Interferometric Wide swath (250km width, 5×20m resolution) — the standard mode over land.
+
+### `compute_sar_stats(region, s1_composite)`
+
+Extracts mean VH and VV values using `reduceRegion(mean)`:
+
+```python
+mean_vh = s1_composite.select("VH").reduceRegion(mean, region, scale=10)
+mean_vv = s1_composite.select("VV").reduceRegion(mean, region, scale=10)
+vh_vv_ratio = 10^((mean_vh - mean_vv) / 10)  # convert dB difference to linear ratio
+```
+
+### `compute_sar_crop_score(vh_db, vh_vv_ratio)`
+
+Rule-based scoring (0.0–1.0):
+
+```
+VH/VV score: peaks at 0.5 (crop canopy sweet spot), 60% weight
+VH intensity score: peaks at -12 dB (moderate scattering), 40% weight
+
+sar_crop_score = 0.6 × vh_vv_score + 0.4 × vh_score
+```
+
+---
+
+## Terrain: SRTM DEM
+
+### `get_terrain_stats(region)`
+
+```python
+dem = ee.Image("USGS/SRTMGL1_003").clip(region)
+elevation = dem.select("elevation")
+slope = ee.Terrain.slope(dem)
+```
+
+Returns `elevation_m` and `slope_deg` via `reduceRegion(mean)`.
+
+**Why terrain?**
+
+- Steep slopes (>15°) are difficult to farm mechanically
+- High elevation (>1500m) limits crop options significantly
+- Mountain forests often get misclassified as cropland by NDVI alone
+- Flat, low-elevation areas are more likely to be agricultural
+
+---
+
+## NDVI Temporal Standard Deviation
+
+The **most important ML feature** (71.6% of model's decision weight).
+
+```python
+ndvi_collection = (
+    ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+    .map(lambda img: img.normalizedDifference(["B8", "B4"]).rename("NDVI"))
+)
+ndvi_stddev = ndvi_collection.reduce(ee.Reducer.stdDev())
+```
+
+**Why this matters:**
+
+| Land Type        | NDVI Mean | NDVI StdDev   | Pattern                              |
+| ---------------- | --------- | ------------- | ------------------------------------ |
+| Active farm      | 0.5–0.7   | **0.10–0.25** | Changes: planting → growth → harvest |
+| Evergreen forest | 0.6–0.8   | **0.01–0.05** | Always green, minimal change         |
+| Fallow field     | 0.1–0.3   | **0.05–0.10** | Some seasonal weed growth            |
+
+Forests stay green year-round (low variability). Crops cycle through seasons (high variability). This single feature is the strongest signal for distinguishing farms from forests.
+
+---
+
+## WorldCover Land Classification
 
 ### `get_cropland_mask(region)`
 
 ```python
-def get_cropland_mask(region):
-    worldcover = ee.Image("ESA/WorldCover/v200/2021").clip(region)
-    cropland = worldcover.eq(40).rename("cropland")
-    return cropland
+worldcover = ee.Image("ESA/WorldCover/v200/2021").clip(region)
+cropland = worldcover.eq(40).rename("cropland")
 ```
 
-**ESA WorldCover** is a static global land classification map at 10m resolution. ESA trained ML models on 2021 satellite data to classify every pixel on Earth.
+**ESA WorldCover** is a static 10m-resolution land classification map (2021 data, ML-classified):
 
-| Class Value | Label              | Description                      |
-| ----------- | ------------------ | -------------------------------- |
-| 10          | Trees              | Forest canopy > 5m               |
-| 20          | Shrubland          | Woody plants < 5m                |
-| 30          | Grassland          | Herbaceous cover                 |
-| **40**      | **Cropland**       | **Agricultural farmland**        |
-| 50          | Built-up           | Buildings, roads, infrastructure |
-| 60          | Bare               | Rock, sand, desert               |
-| 80          | Permanent Water    | Lakes, rivers, reservoirs        |
-| 90          | Herbaceous Wetland | Marshes, swamps                  |
-| 95          | Mangroves          | Coastal tidal forests            |
-| 100         | Moss and Lichen    | Arctic/alpine ground cover       |
-
-**Why `.eq(40)`?** Creates a binary mask: 1 where the pixel IS cropland, 0 everywhere else. This lets us use it as a filter.
+| Class  | Label           | Description                      |
+| ------ | --------------- | -------------------------------- |
+| 10     | Trees           | Forest canopy > 5m               |
+| 20     | Shrubland       | Woody plants < 5m                |
+| 30     | Grassland       | Herbaceous cover                 |
+| **40** | **Cropland**    | **Agricultural farmland**        |
+| 50     | Built-up        | Buildings, roads, infrastructure |
+| 60     | Bare            | Rock, sand, desert               |
+| 80     | Permanent Water | Lakes, rivers, reservoirs        |
 
 ---
 
-### `compute_cultivated_stats(region, year, start_month, end_month, cloud_threshold, ndvi_threshold)`
+## `compute_cultivated_stats()` — The Orchestrator
 
-This is the orchestrator function. It:
-
-1. Calls `get_sentinel2_composite()` → median image
-2. Calls `compute_ndvi()` → NDVI layer
-3. Calls `get_cropland_mask()` → binary cropland mask
-4. Creates `active_veg = ndvi.gt(threshold)` → binary vegetation mask
-5. Creates `cultivated = cropland.And(active_veg)` → intersection
-6. Uses `ee.Image.pixelArea()` with `reduceRegion()` to sum areas
-7. Computes per-class breakdown for all 10 WorldCover classes
-8. Sends everything to Google in ONE `.getInfo()` call
-
-**Per-class breakdown logic:**
+Collects ALL features in a **single batched** `.getInfo()` call:
 
 ```python
-for class_val, class_name in WORLDCOVER_CLASSES.items():
-    mask = worldcover_raw.eq(class_val)
-    class_areas[class_name] = pixel_area.updateMask(mask).reduceRegion(...)
+batch = {
+    "total_area":      total_area_stat,      # pixel areas summed
+    "cropland_area":   cropland_area_stat,   # WorldCover == 40
+    "active_veg_area": active_veg_stat,      # NDVI > 0.3
+    "cultivated_area": cultivated_stat,      # cropland AND active_veg
+    "mean_ndvi":       mean_ndvi_stat,       # NDVI mean
+    "ndvi_stddev":     ndvi_stddev_stat,     # temporal NDVI std deviation
+    "mean_vh":         sar_vh_stat,          # Sentinel-1 VH
+    "mean_vv":         sar_vv_stat,          # Sentinel-1 VV
+    "elevation":       elevation_stat,       # SRTM elevation
+    "slope":           slope_stat,           # SRTM slope
+    # ... + per WorldCover class areas
+}
+results = ee.Dictionary(batch).getInfo()     # ← ONE network call
 ```
 
-This loops through all 10 classes, creating a binary mask for each and summing the area of matching pixels within the polygon.
+**Why batch?** Each `.getInfo()` call takes 3–8 seconds (network latency + cloud computation). By batching all 15+ statistics into one call, we avoid making 15 separate round trips. Total time ≈ 5–10 seconds instead of 45–120 seconds.
+
+---
+
+## Thumbnails
+
+### `generate_thumbnails(region, ...)`
+
+Generates 2 optical thumbnails via `getThumbURL()`:
+
+1. **Satellite RGB** — true-color view (B4/B3/B2)
+2. **NDVI gradient mask** — green = dense vegetation, brown = bare soil
+
+### `generate_sar_thumbnail(region, s1_composite)`
+
+Generates a SAR radar backscatter thumbnail with blue-to-orange gradient:
+
+- **Blue** = low backscatter (water, smooth surfaces)
+- **Orange** = high backscatter (rough surfaces, dense vegetation)
 
 ---
 
 ## Lazy Evaluation — The Most Important Concept
 
-**Nothing in this file actually processes data locally.** Every line builds a _computation graph_:
+**Nothing in this file processes data locally.** Every line builds a _computation graph_:
 
 ```python
 # This does NOT download satellite images:
@@ -185,26 +280,8 @@ collection = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED").filterBounds(regi
 # This does NOT compute NDVI:
 ndvi = composite.normalizedDifference(["B8", "B4"])
 
-# This does NOT calculate areas:
-total_area = pixel_area.reduceRegion(reducer=ee.Reducer.sum(), ...)
-
 # THIS is when everything actually runs:
-results = ee.Dictionary(batch).getInfo()  # ← sends graph to Google
+results = ee.Dictionary(batch).getInfo()  # ← sends entire graph to Google
 ```
 
-**Why lazy?** Earth Engine processes petabytes of data. If every line triggered a network call, a simple analysis would take minutes. Instead, we build the entire computation as a graph, send it once, and Google's distributed infrastructure executes it efficiently.
-
----
-
-## Why Two Signals? (WorldCover + NDVI)
-
-Using either alone produces false positives:
-
-| Scenario           | WorldCover  | NDVI > 0.3 | Intersection       | Correct? |
-| ------------------ | ----------- | ---------- | ------------------ | -------- |
-| Active paddy field | Cropland ✅ | High ✅    | **Cultivated** ✅  | ✅ Yes   |
-| Dense forest       | Trees ❌    | High ✅    | **Not cultivated** | ✅ Yes   |
-| Fallow farmland    | Cropland ✅ | Low ❌     | **Not cultivated** | ✅ Yes   |
-| Construction site  | Built-up ❌ | Low ❌     | **Not cultivated** | ✅ Yes   |
-
-The intersection catches the one scenario that matters: land that IS classified as farmland AND has something actively growing.
+**Why lazy?** Earth Engine hosts petabytes of data. If every line triggered a network call, analysis would take minutes. Instead, we build the entire computation graph locally, send it once, and Google's distributed infrastructure executes it efficiently — often processing terabytes in under 10 seconds.
