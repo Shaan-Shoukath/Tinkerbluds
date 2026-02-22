@@ -197,3 +197,97 @@ for (const [name, acres] of sorted) {
 | **Leaflet 1.9.4**        | unpkg.com            | Map rendering, polygon drawing |
 | **Esri World Imagery**   | arcgisonline.com     | Free satellite map tiles       |
 | **Google Fonts (Inter)** | fonts.googleapis.com | Clean modern typography        |
+
+---
+
+## Yield Feasibility Section
+
+After the stat cards, when a crop is claimed, the dashboard shows:
+
+```
+┌─────────────────────────────────────────────────┐
+│  🌾 YIELD FEASIBILITY                  MODERATE │
+│                                                 │
+│  CROP: Tea    EST: 1.10 t/ha   TOTAL: 0.71 t   │
+│                                                 │
+│  ACTUAL VS IDEAL CONDITIONS (LAST 90 DAYS)      │
+│  🌡️ Temperature  27.3°C   13–30°C      ████ 100%│
+│  🌧️ Rainfall     33.3mm   1500–3000mm       0%│
+│  💧 Humidity     55.9%    70–90%             0%│
+│  🏜️ Soil Moist.  0.234    0.25–0.45    ███  84%│
+│  🌿 Vegetation   NDVI     ≥ 0.3        ███  70%│
+│                                                 │
+│  Overall Feasibility            ████████   55%  │
+├─────────────────────────────────────────────────┤
+│  ⚠️ Tea will have POOR YIELD here —             │
+│     Rainfall, Humidity critically low            │
+│                                                 │
+│  🌧️ Rainfall too low — needs 1500–3000mm,       │
+│     got 33mm                              0%    │
+│  💧 Humidity too low — needs 70–90%,             │
+│     got 55.9%                             0%    │
+└─────────────────────────────────────────────────┘
+```
+
+### Warning Banner Logic
+
+The warning banner appears in **two** scenarios:
+
+1. **`is_unsuitable = true`** (overall < 40%) → **Red** banner, "🚫 NOT RECOMMENDED"
+2. **`has_critical_failure = true`** (any parameter ≤ 5%) → **Orange** banner, "⚠️ POOR YIELD"
+
+```javascript
+const showCritical = data.has_critical_failure || data.is_unsuitable;
+const hasReasons = data.unsuitability_reasons?.length > 0;
+
+if (showCritical || hasReasons) {
+  // Red for overall failure, orange for critical-only
+  const isSevere = data.is_unsuitable;
+  // Display banner with reasons and per-param score badges
+}
+```
+
+Each reason line shows a **score badge** — red (≤5%) or yellow (6–49%) — so users see at a glance which parameters are problematic.
+
+---
+
+## Crop Recommendation Cards
+
+The top 5 recommended crops are displayed as cards with suitability scores:
+
+```
+┌─────────────────────────────────────────────────┐
+│  🌾 BEST CROPS FOR THIS LOCATION                │
+│                                                 │
+│  #1 Cashew        78%  ████████████████████     │
+│  Temp: 92%  Rain: 55%  Hum: 72%  Soil: 80%     │
+│                                                 │
+│  #2 Mango         74%  ██████████████████       │
+│  ⚠️ Humidity too low                             │
+│  Temp: 95%  Rain: 45%  Hum: 3%   Soil: 85%     │
+└─────────────────────────────────────────────────┘
+```
+
+Crops with `has_critical_failure: true` display a ⚠️ warning and the yield warning text below the suitability bar.
+
+---
+
+## Plot Confirmation (PASS/REVIEW/FAIL)
+
+The confirmation prompt is **only shown for PASS or REVIEW** decisions:
+
+| Decision   | UI Behaviour                             |
+| ---------- | ---------------------------------------- |
+| **PASS**   | Show "Is this your plot?" + farmer form  |
+| **REVIEW** | Show prompt + farmer form (same as PASS) |
+| **FAIL**   | Show "Cannot register plot" message only |
+
+```javascript
+if (data.decision === "FAIL") {
+  // Show: "This plot has not been classified as cultivated land..."
+} else {
+  // Show confirmation prompt → farmer form → save
+}
+```
+
+The `cultivated_percentage` is sent along with the confirmation, enabling the backend to compute the **effective cultivated area** (`area_acres × cultivated_percentage / 100`).

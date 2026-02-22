@@ -6,18 +6,48 @@ Upload a KML polygon → get an instant validation score covering plot existence
 
 ---
 
-## Deliverables Checklist
+## Required Deliverables
 
-| #   | Deliverable                          | Status | How It Works                                                                                             |
-| --- | ------------------------------------ | ------ | -------------------------------------------------------------------------------------------------------- |
-| 1   | **Plot existence verification**      | ✅     | KML polygon parsed → mapped to Sentinel-2 imagery → satellite thumbnail confirms physical land exists    |
-| 2   | **Agricultural land classification** | ✅     | ESA WorldCover (class 40 = cropland) intersected with NDVI > 0.3 (active vegetation)                     |
-| 3   | **Claimed crop plausibility**        | ✅     | 20-crop Kerala DB compared against actual weather + soil moisture + NDVI; unsuitability warnings if poor |
-| 4   | **Supporting evidence layers**       | ✅     | Satellite RGB thumbnail, NDVI gradient mask, land-class breakdown chart, weather comparison table        |
-| 5   | **Pass/fail decision logic**         | ✅     | Confidence-based: cultivated % > 60% → PASS, else REVIEW; FAIL plots blocked from Supabase               |
-| 6   | **API-ready validation service**     | ✅     | FastAPI with Swagger docs at `/docs`; all endpoints return JSON                                          |
-| 7   | **Farmer DB + overlap detection**    | ✅     | Supabase stores farmers/plots; Shapely detects overlaps > 5%; admin alerts created automatically         |
-| 8   | **Documentation**                    | ✅     | 6 developer docs in `developers_debug/` + this README + inline docstrings                                |
+### 1. A plot validation score indicating:
+
+| Sub-requirement                           | Status | Implementation                                                                                                                                     |
+| ----------------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Whether the plot exists**               | ✅     | KML polygon parsed → mapped to Sentinel-2 imagery → satellite thumbnail confirms physical land exists at the given coordinates                     |
+| **Whether it is agricultural land**       | ✅     | ESA WorldCover (class 40 = Cropland) intersected with NDVI > 0.3 (active vegetation) → cultivated area percentage calculated                       |
+| **Whether the claimed crop is plausible** | ✅     | 20-crop Kerala DB compared against actual weather + soil moisture (0–7cm) + NDVI; unsuitability warnings if overall < 40% or any parameter at 0%   |
+| **Supporting evidence layers**            | ✅     | Historical satellite RGB thumbnail, NDVI gradient mask, land-class breakdown chart (Trees / Cropland / Built-up / Water), weather comparison table |
+
+### 2. Clear pass/fail or confidence-based decision logic
+
+| Component                  | Status | Implementation                                                                                                           |
+| -------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------ |
+| **Confidence score**       | ✅     | `confidence = 0.7 × cultivated% + 0.3 × mean_NDVI` — weighted formula combining land coverage and vegetation health      |
+| **Decision thresholds**    | ✅     | Cultivated % > 60% → **PASS**, ≤ 60% → **REVIEW**, no cropland → **FAIL**                                                |
+| **Yield feasibility**      | ✅     | 5-parameter scoring (temp, rain, humidity, soil moisture, NDVI) with 25/25/10/15/25% weights → overall suitability score |
+| **Unsuitability warnings** | ✅     | Crops below 40% overall → "🚫 Not Recommended"; any parameter ≤ 5% → "⚠️ Poor Yield" with specific reasons               |
+| **FAIL guard**             | ✅     | Non-cultivated (FAIL) plots are blocked from being saved to Supabase; only PASS/REVIEW can proceed                       |
+
+### 3. An API-ready validation service
+
+| Component                 | Status | Implementation                                                                                               |
+| ------------------------- | ------ | ------------------------------------------------------------------------------------------------------------ |
+| **REST API**              | ✅     | FastAPI with 3 endpoints: `/validate_plot`, `/confirm_plot`, `/admin/alerts` — all return JSON               |
+| **Swagger docs**          | ✅     | Auto-generated at `http://localhost:8000/docs`                                                               |
+| **Farmer DB + storage**   | ✅     | Supabase stores farmers (by phone), plots (GeoJSON + KML), and overlap alerts; cultivated area auto-adjusted |
+| **Overlap detection**     | ✅     | Shapely-based geometric overlap check (≥ 5% threshold) with admin alert creation                             |
+| **Interactive dashboard** | ✅     | Single-page HTML dashboard with map, charts, crop recommendations, and farmer registration                   |
+
+### 4. Documentation outlining validation rules and ML components
+
+| Component                     | Status | Implementation                                                                                               |
+| ----------------------------- | ------ | ------------------------------------------------------------------------------------------------------------ |
+| **Validation rules**          | ✅     | Scoring formulas, decision thresholds, and evidence layers documented in `04_validation_scoring.md` + README |
+| **ML / satellite components** | ✅     | Earth Engine pipeline (NDVI, WorldCover, compositing) documented in `03_earth_engine_pipeline.md`            |
+| **Yield & crop scoring**      | ✅     | 20-crop database, 5-parameter comparison, Open-Meteo integration documented in `07_yield_service.md`         |
+| **System architecture**       | ✅     | End-to-end request lifecycle, module dependency map in `01_architecture.md`                                  |
+| **Frontend walkthrough**      | ✅     | Dashboard UI components, JS logic, CSS design system in `05_dashboard_frontend.md`                           |
+| **Supabase & overlap**        | ✅     | DB schema, overlap algorithm, API endpoints in `06_supabase_overlap.md`                                      |
+| **Developer docs index**      | ✅     | 7 docs in `developers_debug/` with reading order guide                                                       |
 
 ---
 
@@ -103,6 +133,8 @@ Open `http://localhost:8000` for the dashboard, or `http://localhost:8000/docs` 
   "yield_feasibility_score": 0.85,
   "yield_confidence": "HIGH",
   "is_unsuitable": false,
+  "has_critical_failure": false,
+  "yield_warning": "",
   "unsuitability_reasons": [],
   "weather_actual": {
     "avg_temp_c": 27.3,
@@ -137,6 +169,8 @@ Open `http://localhost:8000` for the dashboard, or `http://localhost:8000/docs` 
       "vegetation_score": 1.0,
       "baseline_yield": 2.96,
       "is_unsuitable": false,
+      "has_critical_failure": false,
+      "yield_warning": "",
       "unsuitability_reasons": []
     }
   ]
@@ -249,6 +283,10 @@ If a crop's overall suitability score falls below **40%**, it is flagged as **"N
 - 🌧️ _"Rainfall too low for Rice — needs 1500–3000mm, got 80mm"_
 - 🏜️ _"Soil too dry for Pepper — needs 0.25–0.45 m³/m³, got 0.12"_
 
+If overall score is above 40% but **any single parameter is ≤ 5%**, a "critical failure" warning is shown:
+
+- ⚠️ _"Tea will have POOR YIELD here — Rainfall, Humidity critically low"_
+
 ---
 
 ## Project Structure
@@ -267,13 +305,14 @@ Tinkerbluds/
 │   ├── yield_service.py              ← Kerala crop DB + Open-Meteo + yield
 │   └── supabase_service.py           ← Farmer DB + overlap detection
 ├── static/index.html                 ← Dashboard UI (single-file app)
-├── developers_debug/                 ← Developer documentation (6 docs)
+├── developers_debug/                 ← Developer documentation (7 docs)
 │   ├── 01_architecture.md            ← System diagram + request lifecycle
 │   ├── 02_kml_geometry.md            ← KML parsing deep-dive
 │   ├── 03_earth_engine_pipeline.md   ← Sentinel-2 + NDVI + WorldCover
 │   ├── 04_validation_scoring.md      ← Scoring formulas + examples
 │   ├── 05_dashboard_frontend.md      ← Frontend JS/CSS walkthrough
-│   └── 06_supabase_overlap.md        ← Supabase + overlap detection
+│   ├── 06_supabase_overlap.md        ← Supabase + overlap detection
+│   └── 07_yield_service.md           ← Yield, crop DB, soil moisture, warnings
 ├── requirements.txt
 └── .env                              ← EE_PROJECT_ID + Supabase keys
 ```
@@ -296,10 +335,10 @@ Crop recommendations are always generated (no `claimed_crop` needed) — all 20 
 
 | Category   | Crops                                                                |
 | ---------- | -------------------------------------------------------------------- |
-| Food       | Rice, Tapioca, Banana, Maize                                         |
+| Food       | Rice, Tapioca, Banana                                                |
 | Plantation | Coconut, Rubber, Tea, Coffee, Arecanut, Cashew                       |
 | Spices     | Pepper, Cardamom, Ginger, Turmeric, Nutmeg, Clove, Vanilla, Cinnamon |
-| Other      | Sugarcane, Groundnut                                                 |
+| Fruits     | Pineapple, Jackfruit, Mango                                          |
 
 ---
 
@@ -326,4 +365,4 @@ When a plot is saved to Supabase:
 
 ## For Developers
 
-See [`developers_debug/`](developers_debug/) for 6 detailed docs: architecture diagrams, function-level explanations, Earth Engine pipeline, scoring formulas, frontend walkthrough, and Supabase integration. Start with the [README](developers_debug/README.md).
+See [`developers_debug/`](developers_debug/) for 7 detailed docs: architecture diagrams, function-level explanations, Earth Engine pipeline, scoring formulas, frontend walkthrough, Supabase integration, and yield service. Start with the [README](developers_debug/README.md).

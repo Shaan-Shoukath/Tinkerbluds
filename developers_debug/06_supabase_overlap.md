@@ -143,7 +143,7 @@ def check_overlap(new_polygon_geojson, new_plot_id=None):
         intersection = new_shape.intersection(existing_shape)
         overlap_pct = intersection.area / new_area
 
-        if overlap_pct >= OVERLAP_THRESHOLD:  # Default: 0.30 (30%)
+        if overlap_pct >= OVERLAP_THRESHOLD:  # Default: 0.05 (5%)
             # Create alert in overlap_alerts table
             sb.table("overlap_alerts").insert({
                 "new_plot_id": new_plot_id,
@@ -173,7 +173,7 @@ def check_overlap(new_polygon_geojson, new_plot_id=None):
 
     overlap_pct = area(I) / area(A)
 
-    If overlap_pct ≥ 0.30 → ⚠️ ALERT
+    If overlap_pct ≥ 0.05 → ⚠️ ALERT
 ```
 
 **Why overlap_pct = I/A (not I/B)?** We measure "what fraction of the NEW plot overlaps with existing claims." This catches cases where a small plot is entirely inside a larger one (100% overlap), even though the large plot only loses a small percentage.
@@ -183,17 +183,18 @@ def check_overlap(new_polygon_geojson, new_plot_id=None):
 ### Overlap Threshold
 
 ```python
-OVERLAP_THRESHOLD = 0.30  # 30%
+OVERLAP_THRESHOLD = 0.05  # 5%
 ```
 
 Defined at top of `supabase_service.py`. Adjustable — lower values catch more overlaps but may produce false positives for neighboring plots that share boundaries.
 
-| Threshold | Catches                                       |
-| --------- | --------------------------------------------- |
-| 0.10      | Almost any boundary touch (many false alarms) |
-| **0.30**  | **Significant overlap only (recommended)**    |
-| 0.50      | Only catches major overlaps                   |
-| 0.80      | Only near-complete duplicates                 |
+| Threshold | Catches                                      |
+| --------- | -------------------------------------------- |
+| **0.05**  | **Even small boundary overlaps (current)**   |
+| 0.10      | Most overlaps without excessive false alarms |
+| 0.30      | Significant overlaps only                    |
+| 0.50      | Only catches major overlaps                  |
+| 0.80      | Only near-complete duplicates                |
 
 ---
 
@@ -211,12 +212,17 @@ Defined at top of `supabase_service.py`. Adjustable — lower values catch more 
   "plot_label": "Paddy Field North",
   "polygon_geojson": {"type": "Polygon", "coordinates": [[[76.1, 10.2], ...]]},
   "kml_data": "<?xml version=\"1.0\"?>...",
-  "area_acres": 2.5,
+  "area_acres": 10.0,
+  "cultivated_percentage": 70.0,
   "ndvi_mean": 0.72,
   "decision": "PASS",
   "confidence_score": 0.85
 }
 ```
+
+> **FAIL Guard:** Plots with `decision: "FAIL"` are rejected with HTTP 400. Only PASS/REVIEW plots can be saved.
+>
+> **Area Adjustment:** The stored area = `area_acres × cultivated_percentage / 100`. A 10-acre plot at 70% green → **7 acres** stored in Supabase.
 
 **Response** (`ConfirmPlotResponse`):
 

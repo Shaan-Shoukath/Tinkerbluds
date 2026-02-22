@@ -71,18 +71,24 @@ When a user uploads `field.kml`:
 6. Router converts m² to acres, extracts polygon coords
 7. earth_engine_service.py generates satellite + NDVI gradient mask thumbnails
 8. If claimed_crop is provided:
-   a. yield_service.py fetches last 90 days of weather from Open-Meteo
-   b. Compares actual vs ideal conditions (Kerala-specific crop DB)
+   a. yield_service.py fetches last 90 days of weather + soil moisture from Open-Meteo
+   b. Compares actual vs ideal conditions (5 params: temp, rain, humidity, soil, NDVI)
    c. Estimates yield and computes feasibility score
-   d. Integrates yield score into overall confidence
-9. Crop recommendations generated (top 5 by suitability)
+   d. Detects critical failures (any parameter ≤ 5%) → yield warning
+   e. Flags crops below 40% overall as "Not Recommended" with reasons
+   f. Integrates yield score into overall confidence
+9. Crop recommendations generated (top 5 by suitability, with warnings)
 10. JSON response returned to browser
 11. User sees results → "Is this your plot?" prompt
+    - FAIL plots: blocked — shows "Cannot Register Plot" message
+    - PASS/REVIEW plots: continue to farmer form
 12. If confirmed → POST /confirm_plot:
-    a. supabase_service.py upserts farmer (by phone)
-    b. Saves plot polygon + KML to Supabase
-    c. Checks overlap against all existing plots (Shapely)
-    d. If overlap > 30% → creates alert + shows warning
+    a. Guard: rejects FAIL plots (HTTP 400)
+    b. supabase_service.py upserts farmer (by phone)
+    c. Computes effective area = area_acres × cultivated_pct / 100
+    d. Saves plot polygon + KML to Supabase (with adjusted area)
+    e. Checks overlap against all existing plots (Shapely)
+    f. If overlap ≥ 5% → creates alert + shows warning
 ```
 
 **Key insight:** Steps 4a–4g build a _computation graph_ locally (no data moves). Only step 4h triggers actual satellite processing on Google's servers. This is called **lazy evaluation**.

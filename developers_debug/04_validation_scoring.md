@@ -150,3 +150,41 @@ result["dominant_class"] = max(raw_classes, key=raw_classes.get)
 ```
 
 Python's `max()` with `key=dict.get` finds the class name with the largest area value. This tells the user what the land primarily is (e.g. "Trees", "Cropland").
+
+---
+
+## Yield Feasibility Integration (in `router.py`)
+
+When `claimed_crop` is provided, the yield score is integrated into the overall confidence:
+
+```python
+def integrate_yield_score(base_confidence, yield_feasibility_score):
+    """Combined score = 60% land validation + 40% crop feasibility"""
+    return round(0.6 * base_confidence + 0.4 * yield_feasibility_score, 4)
+```
+
+| Source            | Weight | What it measures                 |
+| ----------------- | ------ | -------------------------------- |
+| Land validation   | 60%    | Is this actually cultivated land |
+| Yield feasibility | 40%    | Can the claimed crop grow here   |
+
+### Yield Parameter Weights
+
+```
+overall_yield = 25% × temperature
+             + 25% × rainfall
+             + 10% × humidity
+             + 15% × soil_moisture
+             + 25% × vegetation (NDVI)
+```
+
+### Warning Levels
+
+| Condition                   | Label               | UI Treatment       |
+| --------------------------- | ------------------- | ------------------ |
+| Overall < 40%               | **NOT RECOMMENDED** | 🚫 Red banner      |
+| Any parameter ≤ 5%          | **POOR YIELD**      | ⚠️ Orange banner   |
+| Overall 40–75%, no critical | **MODERATE**        | Yellow score badge |
+| Overall ≥ 75%               | **HIGH**            | Green score badge  |
+
+> For full details on the yield scoring, crop database, and warning system, see [07_yield_service.md](07_yield_service.md).
