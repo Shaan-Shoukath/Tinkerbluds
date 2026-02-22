@@ -1,11 +1,7 @@
-opencv-python
-numpy
-matplotlib
 geopandas
-fiona
+shapely
 requests
 python-dotenv
-Pillow
 fastapi
 uvicorn[standard]
 earthengine-api
